@@ -7,7 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 from PIL import Image
 
-DATA_ROOT = Path("/data/数据科学实践project")
+DATA_ROOT = Path("/data/鏁版嵁绉戝瀹炶返project")
 OUTPUT_BASE = DATA_ROOT / "runs" / "v13_proper" / "dinov3_dataset"
 DEVICE = "cuda"
 IMG_SIZE = 512; BATCH = 8
@@ -18,8 +18,8 @@ class TestDataset(Dataset):
     def __len__(self): return len(self.df)
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
-        img = Image.open(Path("/data/数据科学实践project/test_images/test_images") / row["id"]).convert("RGB")
-        if not img: img = Image.open(Path("/data/数据科学实践project/test_images") / row["id"]).convert("RGB")
+        img = Image.open(Path("/data/鏁版嵁绉戝瀹炶返project/test_images/test_images") / row["id"]).convert("RGB")
+        if not img: img = Image.open(Path("/data/鏁版嵁绉戝瀹炶返project/test_images") / row["id"]).convert("RGB")
         if self.transform: img = self.transform(img)
         return img, row["id"]
 

@@ -1,8 +1,8 @@
 """
-双模型融合：DINOv2 + ConvNeXtV2-Base
-- 冻结特征提取 → 线性分类头 (LogisticRegression)
-- 加权概率融合: 0.80 * DINOv2 + 0.20 * ConvNeXtV2
-- 只用真实标注训练，不加伪标签 (伪标签在范例中反复导致分数下降)
+Two-model blend:DINOv2 + ConvNeXtV2-Base
+- Frozen features -> linear classifier (LogisticRegression)
+- Weighted probability blend: 0.80 * DINOv2 + 0.20 * ConvNeXtV2
+- Use labeled data only (pseudo-labels lowered scores in previous experiments)
 """
 from pathlib import Path
 import json, hashlib, random
@@ -25,7 +25,7 @@ from sklearn.pipeline import make_pipeline
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 0. 配置
+# 0. Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 OUTPUT_DIR = DATA_ROOT / "runs" / f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -37,7 +37,7 @@ BATCH_SIZE = 16
 NUM_WORKERS = 4
 VAL_RATIO = 0.2
 
-# 融合权重 (来自范例：DINO 主导，ConvNeXtV2 小修正)
+# Blend weights (DINO dominates with a smaller ConvNeXtV2 correction)
 W_DINO = 0.80
 W_CONV = 0.20
 
@@ -57,7 +57,7 @@ set_seed(SEED)
 
 
 # ==========================================
-# 1. 数据集类
+# 1. Dataset class
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):
@@ -80,13 +80,13 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 
 
 # ==========================================
-# 2. 数据加载
+# 2. Load data
 # ==========================================
 def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir(): return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -152,16 +152,16 @@ def extract_features(loader, model, device, is_test=False):
 
 
 # ==========================================
-# 4. 加载数据 (只用真实标注，不加伪标签)
+# 4. Load labeled data (exclude pseudo-labels)
 # ==========================================
 print("\n" + "=" * 60)
-print("加载数据 (仅真实标注)")
+print("Load data (original labels only)")
 print("=" * 60)
 
 train_df = load_train_dataframe(DATA_ROOT)
 test_df = load_test_dataframe(DATA_ROOT)
 
-# 简单分层划分训练/验证
+# Stratified training and validation split
 from sklearn.model_selection import train_test_split
 train_idx, val_idx = train_test_split(
     np.arange(len(train_df)), test_size=VAL_RATIO,
@@ -174,21 +174,21 @@ print(f"Train: {len(train_sub)}, Val: {len(val_sub)}, Test: {len(test_df)}")
 print(f"Train dist: {train_sub['label'].value_counts().sort_index().to_dict()}")
 
 # ==========================================
-# 5. 加载 DINOv2 ViT-L14
+# 5. Load DINOv2 ViT-L14
 # ==========================================
 print("\n" + "=" * 60)
-print("加载 DINOv2 ViT-L14")
+print("Load DINOv2 ViT-L14")
 print("=" * 60)
 dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
 dinov2.eval().to(DEVICE)
 
-# DINOv2 特征提取 (训练集 + TTA 测试集)
+# DINOv2 feature extraction (training and test-time augmentations)
 train_ds = MeteoriteDataset(train_sub, transforms=dino_transform)
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-print("DINOv2 训练特征...")
+print("DINOv2 Training features...")
 train_X_dino, train_y = extract_features(train_loader, dinov2, DEVICE)
 
-# DINO TTA 测试 (原始+翻转)
+# DINO TTA test (original and flipped views)
 tta_flips = [
     dino_transform,
     transforms.Compose([transforms.RandomHorizontalFlip(p=1.0), dino_transform]),
@@ -204,10 +204,10 @@ test_X_dino = np.mean(test_X_dino_list, axis=0)
 print(f"DINOv2: train={train_X_dino.shape}, test={test_X_dino.shape}")
 
 # ==========================================
-# 6. 加载 ConvNeXtV2-Base
+# 6. Load ConvNeXtV2-Base
 # ==========================================
 print("\n" + "=" * 60)
-print("加载 ConvNeXtV2-Base")
+print("Load ConvNeXtV2-Base")
 print("=" * 60)
 
 # ConvNeXt-Base from torchvision
@@ -218,7 +218,7 @@ convnext.eval().to(DEVICE)
 
 @torch.no_grad()
 def extract_conv_features(loader, model, device, is_test=False):
-    """ConvNeXt 输出 (N, 1024, 1, 1)，需要 flatten 到 (N, 1024)"""
+    """ConvNeXt returns (N, 1024, 1, 1); flatten to (N, 1024)"""
     model.eval()
     all_feats, all_labels, all_paths = [], [], []
     for batch in tqdm(loader, desc='ConvNeXt'):
@@ -236,7 +236,7 @@ def extract_conv_features(loader, model, device, is_test=False):
 
 train_ds_c = MeteoriteDataset(train_sub, transforms=conv_transform)
 train_loader_c = DataLoader(train_ds_c, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-print("ConvNeXtV2 训练特征...")
+print("ConvNeXtV2 Training features...")
 train_X_conv, _ = extract_conv_features(train_loader_c, convnext, DEVICE)
 
 # ConvNeXt TTA
@@ -255,17 +255,17 @@ test_X_conv = np.mean(test_X_conv_list, axis=0)
 print(f"ConvNeXt-Base: train={train_X_conv.shape}, test={test_X_conv.shape}")
 
 # ==========================================
-# 7. 线性分类头 (LogisticRegression — 等价于可训练的线性分类头)
+# 7. Linear head (logistic regression)
 # ==========================================
 print("\n" + "=" * 60)
-print("训练分类头 + 5折CV")
+print("Train the head with five-fold CV")
 print("=" * 60)
 
-# L2 归一化特征 (先清理 NaN/Inf)
+# L2 Normalize features (first clean NaN/Inf)
 for name, arr in [("DINO-train", train_X_dino), ("DINO-test", test_X_dino),
                    ("Conv-train", train_X_conv), ("Conv-test", test_X_conv)]:
     if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
-        print(f"  {name}: 发现 NaN/Inf，已清理")
+        print(f"  {name}: Replaced NaN/Inf values")
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
 train_X_dino = np.nan_to_num(train_X_dino, nan=0.0, posinf=0.0, neginf=0.0)
@@ -278,52 +278,52 @@ test_X_dino = normalize(test_X_dino.astype(np.float64), norm='l2', axis=1)
 train_X_conv = normalize(train_X_conv.astype(np.float64), norm='l2', axis=1)
 test_X_conv = normalize(test_X_conv.astype(np.float64), norm='l2', axis=1)
 
-# DINOv2 分类头
+# DINOv2 classifier head
 dino_clf = make_pipeline(
     StandardScaler(),
     LogisticRegression(max_iter=5000, C=1.0, class_weight='balanced', random_state=SEED)
 )
 cv_scores = cross_val_score(dino_clf, train_X_dino, train_y, cv=5, scoring='f1')
-print(f"DINOv2 分类头 5-fold F1: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
+print(f"DINOv2 classifier head 5-fold F1: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
 
 dino_clf.fit(train_X_dino, train_y)
 test_prob_dino = dino_clf.predict_proba(test_X_dino)[:, 1]
 
-# ConvNeXtV2 分类头
+# ConvNeXtV2 classifier head
 conv_clf = make_pipeline(
     StandardScaler(),
     LogisticRegression(max_iter=5000, C=1.0, class_weight='balanced', random_state=SEED)
 )
 cv_scores = cross_val_score(conv_clf, train_X_conv, train_y, cv=5, scoring='f1')
-print(f"ConvNeXtV2 分类头 5-fold F1: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
+print(f"ConvNeXtV2 classifier head 5-fold F1: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
 
 conv_clf.fit(train_X_conv, train_y)
 test_prob_conv = conv_clf.predict_proba(test_X_conv)[:, 1]
 
 # ==========================================
-# 8. 加权概率融合
+# 8. Weighted probability blend
 # ==========================================
 print("\n" + "=" * 60)
-print(f"融合: {W_DINO}*DINOv2 + {W_CONV}*ConvNeXtV2-Base")
+print(f"blend: {W_DINO}*DINOv2 + {W_CONV}*ConvNeXtV2-Base")
 print("=" * 60)
 
 final_probs = W_DINO * test_prob_dino + W_CONV * test_prob_conv
 
-# 各模型独立统计
+# Compute statistics for each model
 for name, probs in [("DINOv2", test_prob_dino), ("ConvNeXtV2", test_prob_conv), ("Blend", final_probs)]:
     print(f"  {name:>12}: min={probs.min():.4f} max={probs.max():.4f} mean={probs.mean():.4f}")
 
-# Natural threshold predictions (用于对比分析)
-print(f"\n  Softmax threshold=0.5 正类数:")
+# Natural threshold predictions (for comparison)
+print(f"\n  Softmax threshold=0.5 Positive count:")
 print(f"    DINOv2: {(test_prob_dino > 0.5).sum()}")
 print(f"    ConvNeXtV2: {(test_prob_conv > 0.5).sum()}")
 print(f"    Blend: {(final_probs > 0.5).sum()}")
 
 # ==========================================
-# 9. 生成 Top-90 提交
+# 9. Write the top-90 submission
 # ==========================================
 print("\n" + "=" * 60)
-print("生成提交文件")
+print("Write the submission")
 print("=" * 60)
 
 clean_ids = [Path(p).name for p in ids]
@@ -331,7 +331,7 @@ clean_ids = [Path(p).name for p in ids]
 sub_df = pd.DataFrame({'id': clean_ids, 'prob': final_probs})
 sub_df = sub_df.sort_values(by='prob', ascending=False).reset_index(drop=True)
 
-# 保存概率
+# Save probabilities
 sub_df.to_csv(OUTPUT_DIR / 'test_probs_ensemble.csv', index=False, encoding='utf-8-sig')
 
 sub_df['label'] = 0
@@ -343,12 +343,12 @@ template['label'] = template['id'].map(sub_df.set_index('id')['label']).fillna(0
 output_csv = OUTPUT_DIR / 'submission_ensemble_top90.csv'
 template.to_csv(output_csv, index=False)
 
-print(f"Top-90: 陨石={int(sub_df['label'].sum())}")
-print(f"输出: {output_csv}")
+print(f"Top-90: meteorites={int(sub_df['label'].sum())}")
+print(f"Output: {output_csv}")
 
-# 验证关键样本 (从范例学到的信号)
+# Inspect selected examples (expected labels from prior experiments)
 print("\n" + "=" * 60)
-print("关键样本验证 (范例信号: 182/17应为正, 168应为负)")
+print("Selected examples (prior expectations: 182 and 17 positive, 168 negative)")
 print("=" * 60)
 key_samples = ['000182.jpg', '000017.jpg', '000168.jpg', '000121.jpg']
 for sid in key_samples:
@@ -374,4 +374,4 @@ with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
         'test_size': int(len(test_df)),
     }, f, indent=2, ensure_ascii=False)
 
-print("\n完成！")
+print("\n Done!")

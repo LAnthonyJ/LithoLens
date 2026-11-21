@@ -12,22 +12,22 @@ SERVER_PROJECT = '/data/数据科学实践project'
 LOCAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
 print("=" * 60)
-print("自训练部署脚本")
+print("Deploy the self-training experiment")
 print("=" * 60)
 
 # 1. Connect
-print("\n[1/5] 连接服务器...")
+print("\n[1/5] Connect to the server...")
 client = paramiko.SSHClient()
 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 try:
     client.connect(HOST, port=PORT, username=USER, password=PASSWORD, timeout=15)
-    print(f"  已连接到 {HOST}:{PORT}")
+    print(f"  Connected to {HOST}:{PORT}")
 except Exception as e:
-    print(f"  连接失败: {e}")
+    print(f"  Connection failed: {e}")
     sys.exit(1)
 
 # 2. Upload files
-print("\n[2/5] 上传文件...")
+print("\n[2/5] Upload files...")
 sftp = client.open_sftp()
 
 files_to_upload = [
@@ -42,12 +42,12 @@ for fname in files_to_upload:
         sftp.put(local_path, remote_path)
         print(f"  {fname} -> {remote_path}")
     else:
-        print(f"  [WARNING] {fname} 不存在于本地，跳过上传")
+        print(f"  [WARNING] {fname} missing locally; skipping upload")
 
 sftp.close()
 
 # 3. Check GPU and dependencies
-print("\n[3/5] 检查环境...")
+print("\n[3/5] Check environment...")
 stdin, stdout, stderr = client.exec_command(
     'nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader 2>&1 && '
     'python3 -c "import torch; print(f\'PyTorch: {torch.__version__}\'); '
@@ -62,7 +62,7 @@ if err:
     print(f"  STDERR: {err[:500]}")
 
 # 4. Verify pseudo-label file on server
-print("\n[4/5] 验证服务器上文件...")
+print("\n[4/5] Verify remote files...")
 stdin, stdout, stderr = client.exec_command(
     f'ls -la {SERVER_PROJECT}/submission_dinov2_L14_top85.csv 2>&1 && '
     f'head -3 {SERVER_PROJECT}/submission_dinov2_L14_top85.csv && echo "---" && '
@@ -72,7 +72,7 @@ stdin, stdout, stderr = client.exec_command(
 print("  " + stdout.read().decode().strip().replace('\n', '\n  '))
 
 # 5. Run training
-print(f"\n[5/5] 开始自训练 ({time.strftime('%H:%M:%S')})...")
+print(f"\n[5/5] Start self-training ({time.strftime('%H:%M:%S')})...")
 print("=" * 60)
 
 stdin, stdout, stderr = client.exec_command(
@@ -92,10 +92,10 @@ if err_out:
     print(f'\nSTDERR:\n{err_out[-2000:]}')
 
 print("\n" + "=" * 60)
-print("训练完成！")
+print("Training complete!")
 
 # Download results
-print("\n下载结果文件...")
+print("\n Download results...")
 sftp = client.open_sftp()
 
 # Find latest pseudo output dir
@@ -123,4 +123,4 @@ if latest_dir:
 
 sftp.close()
 client.close()
-print("\n全部完成！")
+print("\n Finished!")

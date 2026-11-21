@@ -1,4 +1,4 @@
-"""检查学校服务器环境"""
+"""Check the university server environment"""
 import os
 import paramiko
 import sys

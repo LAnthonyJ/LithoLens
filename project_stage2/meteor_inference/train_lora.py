@@ -1,6 +1,6 @@
 """
-Meteor-Mamba LoRA 微调 - 陨石分类
-在训练集上使用 LoRA 微调 Meteor-MLM，冻结 CLIP 和 Meteor-Mamba
+Meteor-Mamba LoRA fine-tuning for meteorite classification
+Fine-tune Meteor-MLM using LoRA while freezing CLIP and Meteor-Mamba
 """
 import os
 import sys
@@ -48,14 +48,14 @@ print(f"GPU: {torch.cuda.get_device_name(0)}")
 
 
 class MeteoriteDataset(Dataset):
-    """陨石分类数据集，格式化为 VQA"""
+    """Meteorite classification dataset formatted as VQA"""
     def __init__(self, csv_path, img_dir, tok_meteor, image_size=490):
         self.df = pd.read_csv(csv_path)
         self.img_dir = img_dir
         self.tok_meteor = tok_meteor
         self.image_size = image_size
 
-        # 将 label 转为文字
+        # Convert the label to text
         self.label_to_text = {1: 'yes', 0: 'no'}
 
     def __len__(self):
@@ -66,7 +66,7 @@ class MeteoriteDataset(Dataset):
         img_path = os.path.join(self.img_dir, row['id'])
         label = int(row['label'])
 
-        # 加载图像
+        # Load image
         try:
             image = Image.open(img_path).convert("RGB")
         except Exception:
@@ -91,7 +91,7 @@ class MeteoriteDataset(Dataset):
 
 
 def load_models():
-    """加载模型并应用 LoRA"""
+    """Load the model and apply LoRA"""
     from meteor.load_mmamba import load_mmamba
     from meteor.load_meteor import load_meteor
     from utils.utils import freeze_model

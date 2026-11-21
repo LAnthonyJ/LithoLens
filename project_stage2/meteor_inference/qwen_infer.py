@@ -1,6 +1,6 @@
 """
-Qwen3.5 零样本陨石分类
-使用服务器上已有的 Qwen3.5 多模态模型判断每张测试图片是否为陨石
+Qwen3.5 zero-shot meteorite classification
+Classify test images with the Qwen3.5 model installed on the server
 """
 import os
 import sys

@@ -1,7 +1,7 @@
 """
-ResNet18 + DINOv2 ViT-L14 特征融合
-ResNet18 捕捉局部纹理，DINOv2 捕捉全局语义，拼接后训练分类器
-包含 Dataset/ 补充数据
+ResNet18 + DINOv2 ViT-L14 Feature fusion
+ResNet18 captures local texture and DINOv2 captures global features; concatenate before classification
+include supplementary data from Dataset/
 """
 from pathlib import Path
 import sys, json, random, hashlib, time
@@ -43,7 +43,7 @@ def set_seed(s):
 set_seed(SEED)
 
 # ============================================================
-# Dataset & Data Utils (复用)
+# Dataset & Data Utils (reuse)
 # ============================================================
 VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tif', '.tiff'}
 
@@ -65,7 +65,7 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 def _resolve_image_dir(root, split):
     for c in [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]:
         if c.is_dir(): return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 def load_train_dataframe(data_root):
     data_root = Path(data_root)
@@ -183,8 +183,8 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
     return dedup, len(df)-len(dedup)
 
 def load_supplementary_data(data_root):
-    """加载 Dataset/ 下的补充数据和原始训练集"""
-    print("加载原始训练数据...")
+    """Load supplementary Dataset/ images and original training data"""
+    print("Load original training data...")
     full_df = load_train_dataframe(data_root)
 
     dataset_dir = Path(data_root) / "Dataset"
@@ -206,7 +206,7 @@ def load_supplementary_data(data_root):
     rock_df = pd.DataFrame(rock_rows).sample(frac=1.0, random_state=SEED).reset_index(drop=True)
     meteorite_df = pd.DataFrame(meteorite_rows).sample(frac=1.0, random_state=SEED).reset_index(drop=True)
 
-    # 控制负样本比例
+    # Limit the negative sample ratio
     target_ratio = 1.5
     n_pos = int(full_df['label'].sum())
     if target_ratio is not None:
@@ -218,13 +218,13 @@ def load_supplementary_data(data_root):
 
     full_df = pd.concat([full_df, rock_df, meteorite_df], ignore_index=True)
     full_df = full_df.sample(frac=1.0, random_state=SEED).reset_index(drop=True)
-    print(f"合并后样本: {len(full_df)}, 类别: {full_df['label'].value_counts().to_dict()}")
+    print(f"Combined samples: {len(full_df)}, classes: {full_df['label'].value_counts().to_dict()}")
     return full_df
 
 # ============================================================
-# 1. 加载数据
+# 1. Load data
 # ============================================================
-print("\n=== 数据加载 ===")
+print("\n=== Load data ===")
 full_train_df = load_supplementary_data(DATA_ROOT)
 train_pool_df = attach_md5_group_ids(full_train_df)
 print(f"MD5 groups: {train_pool_df['group_id'].nunique()}")
@@ -239,9 +239,9 @@ print(f"Val: {len(val_df)} ({val_df['label'].value_counts().to_dict()})")
 print(f"Test: {len(test_df)}")
 
 # ============================================================
-# 2. 加载模型
+# 2. Load model
 # ============================================================
-print("\n=== 加载模型 ===")
+print("\n=== Load model ===")
 
 # ResNet18
 from models import build_model
@@ -259,18 +259,18 @@ dinov2.eval().to(DEVICE)
 print("DINOv2 ViT-L14 loaded")
 
 # ============================================================
-# 3. 特征提取
+# 3. Feature extraction
 # ============================================================
-print("\n=== 特征提取 ===")
+print("\n=== Feature extraction ===")
 
-# ResNet18 预处理（同训练时）
+# ResNet18 preprocessing (as used for training)
 resnet_tfms = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]),
 ])
 
-# DINOv2 预处理
+# DINOv2 Preprocessing
 dinov2_tfms = transforms.Compose([
     transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
     transforms.CenterCrop(224),
@@ -280,7 +280,7 @@ dinov2_tfms = transforms.Compose([
 
 @torch.no_grad()
 def extract_model_features(df, transform_fn, model, device, desc="Features"):
-    """批量提取单一模型的特征。"""
+    """Extract one model's features in batches."""
     from torch.utils.data import DataLoader, Dataset
 
     class TempDataset(Dataset):
@@ -320,26 +320,26 @@ def extract_model_features(df, transform_fn, model, device, desc="Features"):
         return all_feats, np.array(all_labels).astype(int)
     return all_feats, all_paths
 
-# 提取训练特征
-print("提取训练集 ResNet18 特征...")
+# Extract training features
+print("Extract ResNet18 training features...")
 r_train_X, train_y = extract_model_features(train_df, resnet_tfms, resnet_features, DEVICE, "ResNet18 Train")
 r_train_X = r_train_X.reshape(r_train_X.shape[0], -1)  # flatten to [N, 512]
 print(f"ResNet18: {r_train_X.shape}")
 
-print("提取训练集 DINOv2 特征...")
+print("Extract DINOv2 training embeddings...")
 d_train_X, _ = extract_model_features(train_df, dinov2_tfms, dinov2, DEVICE, "DINOv2 Train")
 print(f"DINOv2: {d_train_X.shape}")
 
 train_X = np.concatenate([r_train_X, d_train_X], axis=1)
 print(f"Fused Train: {train_X.shape}, labels: {np.bincount(train_y)}")
 
-# 测试集特征提取 (单视角，快速得出结果)
-print("提取测试集 ResNet18 特征...")
+# Extract test features (single view for speed)
+print("Extract ResNet18 test features...")
 r_test_X, test_ids = extract_model_features(test_df, resnet_tfms, resnet_features, DEVICE, "ResNet18 Test")
 r_test_X = r_test_X.reshape(r_test_X.shape[0], -1)
 print(f"ResNet18 Test: {r_test_X.shape}")
 
-print("提取测试集 DINOv2 特征...")
+print("Extract DINOv2 test embeddings...")
 d_test_X, _ = extract_model_features(test_df, dinov2_tfms, dinov2, DEVICE, "DINOv2 Test")
 print(f"DINOv2 Test: {d_test_X.shape}")
 
@@ -348,9 +348,9 @@ test_X = normalize(test_X, norm='l2', axis=1)
 print(f"Fused Test: {test_X.shape}")
 
 # ============================================================
-# 4. 分类器训练 & 提交
+# 4. Train classifiers and write submissions
 # ============================================================
-print("\n=== 分类器 ===")
+print("\n=== classifier ===")
 n_splits = 5
 skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
 

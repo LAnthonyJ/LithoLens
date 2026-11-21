@@ -1,13 +1,13 @@
 """
-DINOv2 + 显式纹理特征混合分类器
-DINOv2 语义特征 (1024-d) + 手工纹理特征 (N-d) → 拼接 → SVM/kNN
+DINOv2 + hybrid classifier with handcrafted texture
+DINOv2 semantic features (1024-d) + handcrafted texture (N-d) -> concatenate → SVM/kNN
 
-纹理特征直接量化：
-- 局部方差统计量 → 表面异质性（陨石高，长尾夹低）
-- GLCM 纹理属性 → 对比度、均匀度（陨石低均匀度，长尾夹高均匀度）
-- 局部熵统计 → 表面混乱度（陨石不规则，人造物规则）
+The texture descriptors measure:
+- Local variance measures surface heterogeneity (rough rock versus a smooth binder clip)
+- GLCM Texture attributes capture contrast and uniformity (rough surfaces versus uniform clips)
+- Local entropy measures surface irregularity (complex versus uniform patterns)
 
-这种方式不需要修改 DINOv2 输入，而是给分类器提供"第二意见"。
+Keep the DINOv2 input and add a second source of evidence".
 """
 from pathlib import Path
 import sys, json, hashlib, random
@@ -31,7 +31,7 @@ from sklearn.feature_selection import SelectKBest, f_classif
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 0. 配置
+# 0. Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 PROB_FILE = DATA_ROOT / "dinov2_simple_output" / "test_probs_dinov2.csv"
@@ -63,55 +63,55 @@ set_seed(SEED)
 
 
 # ==========================================
-# 1. 显式纹理特征提取
+# 1. Handcrafted texture extraction
 # ==========================================
 def compute_texture_features(image):
     """
-    从PIL图像中提取纹理特征向量。
-    包含：局部方差的统计量 + 局部熵的统计量。
-    陨石 → 高方差、低均匀度；长尾夹 → 低方差、高均匀度。
+    Extract a texture vector from a PIL image.
+    Includes local variance and entropy statistics.
+    Rough surfaces can show higher variation than smooth binder clips.
     """
     import cv2
 
-    # 先缩放到 256 再提取纹理 —— 大幅加速且纹理特征不失真
+    # Resize to 256 pixels before computing texture features for speed
     image = image.resize((256, 256), Image.LANCZOS)
     arr = np.array(image)
     gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY).astype(np.float64)
 
     features = []
 
-    # --- 多尺度局部方差统计 ---
+    # --- Multiscale local variance ---
     for ws in [7, 15, 31]:
         mean = cv2.blur(gray, (ws, ws))
         mean_sq = cv2.blur(gray ** 2, (ws, ws))
         var = np.maximum(mean_sq - mean ** 2, 0)
         std = np.sqrt(var)
         features.extend([
-            float(np.mean(std)),        # 平均纹理密度
-            float(np.std(std)),         # 纹理密度变化
-            float(np.percentile(std, 90)),  # 高纹理区域占比
-            float(np.percentile(std, 50)),  # 中位纹理
-            float(np.max(std)),         # 最强纹理点
+            float(np.mean(std)),        # mean texture variation
+            float(np.std(std)),         # spatial variation in texture
+            float(np.percentile(std, 90)),  # upper tail of texture variation
+            float(np.percentile(std, 50)),  # median texture
+            float(np.max(std)),         # maximum local variation
         ])
 
-    # --- 全局对比度/均匀度 ---
-    # 陨石表面暗但有纹理变化 → 中低亮度、中高对比度
-    features.append(float(np.std(gray)))           # 全局标准差
-    features.append(float(np.max(gray) - np.min(gray)))  # 全局对比度
-    # 梯度能量（近似纹理密度）
+    # --- Global contrast and uniformity ---
+    # A dark but textured surface can have low mean intensity and high contrast
+    features.append(float(np.std(gray)))           # global standard deviation
+    features.append(float(np.max(gray) - np.min(gray)))  # global contrast
+    # Gradient energy (texture density proxy)
     gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
     grad_mag = np.sqrt(gx ** 2 + gy ** 2)
-    features.append(float(np.mean(grad_mag)))      # 平均梯度（边缘密度）
-    features.append(float(np.std(grad_mag)))       # 梯度变化
+    features.append(float(np.mean(grad_mag)))      # mean gradient (edge strength)
+    features.append(float(np.std(grad_mag)))       # gradient variation
 
-    # --- 频域特征 ---
-    # 高频能量占比 → 表面细节量
+    # --- Frequency-domain features ---
+    # High-frequency energy measures fine detail
     f = np.fft.fft2(gray)
     fshift = np.fft.fftshift(f)
     magnitude = np.abs(fshift)
     h, w = magnitude.shape
-    # 高频环能量占比
+    # Energy fraction in the high-frequency ring
     center_h, center_w = h // 2, w // 2
     radius = min(h, w) // 4
     y, x = np.ogrid[:h, :w]
@@ -120,19 +120,19 @@ def compute_texture_features(image):
     high_freq_energy = (magnitude[mask_high] ** 2).sum()
     features.append(float(high_freq_energy / (total_energy + 1e-8)))
 
-    # --- 直方图统计 ---
+    # --- Histogram statistics ---
     hist, _ = np.histogram(gray, bins=32, range=(0, 256), density=True)
     hist = hist[hist > 0]
     entropy = float(-np.sum(hist * np.log2(hist)))
-    features.append(entropy)  # 熵 → 表面混乱度
+    features.append(entropy)  # Entropy measures intensity diversity
 
     return np.array(features, dtype=np.float64)
 
 
 def extract_texture_features_batch(image_paths):
-    """批量提取纹理特征"""
+    """Extract texture features in batches"""
     features_list = []
-    for path in tqdm(image_paths, desc='纹理特征'):
+    for path in tqdm(image_paths, desc='Texture features'):
         try:
             image = Image.open(path)
             image = ImageOps.exif_transpose(image).convert("RGB")
@@ -141,13 +141,13 @@ def extract_texture_features_batch(image_paths):
         except Exception:
             features_list.append(np.zeros(18, dtype=np.float64))  # 18 = 5*3 + 3
     features_matrix = np.stack(features_list, axis=0)
-    # 处理 NaN/Inf
+    # processing NaN/Inf
     features_matrix = np.nan_to_num(features_matrix, nan=0.0, posinf=0.0, neginf=0.0)
     return features_matrix
 
 
 # ==========================================
-# 2. 数据集类 (仅用于 DINOv2 特征提取)
+# 2. Dataset class (for DINOv2 feature extraction only)
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):
@@ -170,14 +170,14 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 
 
 # ==========================================
-# 3. 数据加载与去重 (简化版，与之前相同)
+# 3. Load and deduplicate data (simplified implementation)
 # ==========================================
 def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir():
             return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -339,23 +339,23 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
 
 
 # ==========================================
-# 4. 加载数据
+# 4. Load data
 # ==========================================
 print("\n" + "=" * 60)
-print("数据加载")
+print("Load data")
 print("=" * 60)
 
 real_train_df = load_train_dataframe(DATA_ROOT)
-print(f"真实训练样本: {len(real_train_df)}")
+print(f"Labeled training samples: {len(real_train_df)}")
 
 pseudo_df = load_pseudo_labeled_data(DATA_ROOT, PROB_FILE, PSEUDO_TOP_N, PSEUDO_BOTTOM_N)
-print(f"伪标签: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}陨石 + Bottom-{PSEUDO_BOTTOM_N}非陨石)")
+print(f"Pseudo-labels: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}meteorites + Bottom-{PSEUDO_BOTTOM_N}non-meteorites)")
 
 full_train_df = pd.concat([real_train_df, pseudo_df], ignore_index=True)
 
-# 去重切分
+# Deduplicate and split
 print("\n" + "=" * 60)
-print("去重 + 划分")
+print("Deduplicate and split")
 print("=" * 60)
 train_pool_df = attach_md5_group_ids(full_train_df)
 pseudo_groups = set(train_pool_df[train_pool_df['source'] == 'pseudo']['group_id'])
@@ -377,15 +377,15 @@ val_df, _ = drop_exact_duplicates_in_train(val_df)
 print(f"Train: {len(train_df)}, Val: {len(val_df)}")
 
 # ==========================================
-# 5. DINOv2 特征提取 (含数据增强)
+# 5. DINOv2 feature extraction (with augmentation)
 # ==========================================
 print("\n" + "=" * 60)
-print("加载 DINOv2 ViT-L14")
+print("Load DINOv2 ViT-L14")
 print("=" * 60)
 dinov2_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
 dinov2_model.eval(); dinov2_model.to(DEVICE)
 
-# 基础 transform（测试用，确定性）
+# Base test transform (deterministic)
 base_transform = transforms.Compose([
     transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
     transforms.CenterCrop(224),
@@ -393,9 +393,9 @@ base_transform = transforms.Compose([
     transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
 ])
 
-# 数据增强 transforms — 训练时多视角提取，提升鲁棒性
+# Training augmentations provide multiple views
 def make_aug_transform():
-    """每次调用生成随机增强参数，增加训练数据多样性"""
+    """Draw new transform parameters on each call"""
     return transforms.Compose([
         transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
         transforms.RandomResizedCrop(224, scale=(0.7, 1.0), interpolation=InterpolationMode.BICUBIC),
@@ -407,7 +407,7 @@ def make_aug_transform():
         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
 
-N_TRAIN_VIEWS = 3  # 每张训练图取3个随机增强视角，平均特征
+N_TRAIN_VIEWS = 3  # Average embeddings from three random views per training image
 
 @torch.no_grad()
 def extract_dinov2_embeddings(loader, model, device, is_test=False):
@@ -426,8 +426,8 @@ def extract_dinov2_embeddings(loader, model, device, is_test=False):
     return all_embeddings, np.array(all_labels)
 
 
-# 训练集 DINOv2 特征 — 多视角增强平均
-print(f"\n提取训练集 DINOv2 特征 ({N_TRAIN_VIEWS}-view RandAug)...")
+# Training DINOv2 features averaged across views
+print(f"\n Extract DINOv2 training embeddings ({N_TRAIN_VIEWS}-view RandAug)...")
 train_X_dinov2_list = []
 train_y = None
 for v in range(N_TRAIN_VIEWS):
@@ -438,17 +438,17 @@ for v in range(N_TRAIN_VIEWS):
     train_X_dinov2_list.append(X_v)
     if train_y is None:
         train_y = y_v
-    print(f"  视角 {v+1}/{N_TRAIN_VIEWS}: {X_v.shape}")
+    print(f"  view {v+1}/{N_TRAIN_VIEWS}: {X_v.shape}")
 train_X_dinov2 = np.mean(train_X_dinov2_list, axis=0)
-print(f"DINOv2 训练特征 (增强平均): {train_X_dinov2.shape}")
+print(f"DINOv2 Training features (view average): {train_X_dinov2.shape}")
 
-# 测试集 DINOv2 + TTA (原始3视角 + 增强2视角)
+# Test-time DINOv2 inference (three fixed and two augmented views)
 test_df = load_test_dataframe(DATA_ROOT)
-print(f"\n提取测试集 DINOv2 特征 (5-view TTA)...")
+print(f"\n Extract DINOv2 test embeddings (5-view TTA)...")
 tta_transforms = [
-    ("原始CenterCrop", base_transform),
-    ("水平翻转", transforms.Compose([transforms.RandomHorizontalFlip(p=1.0), base_transform])),
-    ("垂直翻转", transforms.Compose([transforms.RandomVerticalFlip(p=1.0), base_transform])),
+    ("original CenterCrop", base_transform),
+    ("horizontal flip", transforms.Compose([transforms.RandomHorizontalFlip(p=1.0), base_transform])),
+    ("vertical flip", transforms.Compose([transforms.RandomVerticalFlip(p=1.0), base_transform])),
     ("RandAug_1", make_aug_transform()),
     ("RandAug_2", make_aug_transform()),
 ]
@@ -460,65 +460,65 @@ for name, t in tta_transforms:
     test_X_dinov2_list.append(curr_X)
     print(f"  [{name}]: {curr_X.shape}")
 test_X_dinov2 = np.mean(test_X_dinov2_list, axis=0)
-print(f"测试集 DINOv2 特征 (TTA平均): {test_X_dinov2.shape}")
+print(f"DINOv2 test features (TTA average): {test_X_dinov2.shape}")
 
 # ==========================================
-# 6. 纹理特征提取 (显式，不依赖 DINOv2)
+# 6. Handcrafted texture features (independent of DINOv2)
 # ==========================================
 print("\n" + "=" * 60)
-print("提取显式纹理特征")
+print("Extract handcrafted texture features")
 print("=" * 60)
 
-# 训练集纹理特征
+# Training texture features
 train_texture_feat = extract_texture_features_batch(train_df['img_path'].tolist())
-print(f"训练集纹理特征: {train_texture_feat.shape}, 特征数: {train_texture_feat.shape[1]}")
+print(f"Training texture features: {train_texture_feat.shape}, feature count: {train_texture_feat.shape[1]}")
 
-# 测试集纹理特征
+# Test texture features
 test_texture_feat = extract_texture_features_batch(test_df['img_path'].tolist())
-print(f"测试集纹理特征: {test_texture_feat.shape}")
+print(f"Test texture features: {test_texture_feat.shape}")
 
 # ==========================================
-# 7. 特征融合 + 标准化
+# 7. Fuse and scale features
 # ==========================================
 print("\n" + "=" * 60)
-print("特征融合: DINOv2(1024-d) + 纹理特征(N-d)")
+print("Combine DINOv2 (1024 dimensions) with texture(N-d)")
 print("=" * 60)
 
-# L2 归一化 DINOv2 特征
+# L2 Normalize DINOv2 features
 train_X_dinov2_norm = normalize(train_X_dinov2, norm='l2', axis=1)
 test_X_dinov2_norm = normalize(test_X_dinov2, norm='l2', axis=1)
 
-# 标准化纹理特征 (先 fit 训练集)
+# Scale texture features (fit on training data first)
 from sklearn.preprocessing import RobustScaler
 texture_scaler = RobustScaler().fit(train_texture_feat)
 train_texture_scaled = texture_scaler.transform(train_texture_feat)
 test_texture_scaled = texture_scaler.transform(test_texture_feat)
 
-# 拼接
+# concatenate
 train_X = np.concatenate([train_X_dinov2_norm, train_texture_scaled], axis=1)
 test_X = np.concatenate([test_X_dinov2_norm, test_texture_scaled], axis=1)
 
-# 特征选择 (保留前 K 个最有区分度的)
+# Feature selection (keep the top K dimensions)
 selector = SelectKBest(f_classif, k=min(512, train_X.shape[1]))
 train_X = selector.fit_transform(train_X, train_y)
 test_X = selector.transform(test_X)
-print(f"融合后特征维度: {train_X.shape[1]} (DINOv2={train_X_dinov2.shape[1]} + 纹理={train_texture_feat.shape[1]})")
+print(f"Dimensions after fusion: {train_X.shape[1]} (DINOv2={train_X_dinov2.shape[1]} + texture={train_texture_feat.shape[1]})")
 
-# 最终 L2 归一化
+# Final L2 normalization
 train_X = normalize(train_X, norm='l2', axis=1)
 test_X = normalize(test_X, norm='l2', axis=1)
 
-# 样本权重
+# Sample weights
 is_pseudo = (train_df['source'] == 'pseudo').values.astype(float)
 sample_weights = np.where(is_pseudo, PSEUDO_WEIGHT, 1.0)
-print(f"伪标签样本: {int(is_pseudo.sum())}, 权重: {PSEUDO_WEIGHT}x")
-print(f"最终训练特征: {train_X.shape}, 测试特征: {test_X.shape}")
+print(f"Pseudo-labeled samples: {int(is_pseudo.sum())}, weight: {PSEUDO_WEIGHT}x")
+print(f"Final training features: {train_X.shape}, Test features: {test_X.shape}")
 
 # ==========================================
-# 8. 5折CV SVM + kNN (加权)
+# 8. 5 fold SVM + kNN cross-validation (weighted)
 # ==========================================
 print("\n" + "=" * 60)
-print(f"5折交叉验证 SVM + kNN (混合特征)")
+print(f"5 fold SVM + kNN cross-validation (fused features)")
 print("=" * 60)
 
 n_splits = 5
@@ -553,10 +553,10 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(train_X, train_y)):
     knn_test_preds += knn.predict_proba(test_X)[:, 1] / n_splits
 
 # ==========================================
-# 9. 生成提交
+# 9. Write submission
 # ==========================================
 print("\n" + "=" * 60)
-print("生成提交文件")
+print("Write the submission")
 print("=" * 60)
 
 final_scores = (svm_test_preds + knn_test_preds) / 2.0
@@ -567,7 +567,7 @@ sub_df = sub_df.sort_values(by='prob', ascending=False).reset_index(drop=True)
 
 probs_path = OUTPUT_DIR / 'test_probs_hybrid.csv'
 sub_df.to_csv(probs_path, index=False, encoding='utf-8-sig')
-print(f"概率: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
+print(f"Probability: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
 
 sub_df['label'] = 0
 sub_df.loc[:89, 'label'] = 1
@@ -577,7 +577,7 @@ template_df['label'] = template_df['id'].map(sub_df.set_index('id')['label']).fi
 
 output_csv = OUTPUT_DIR / 'submission_hybrid_top90.csv'
 template_df.to_csv(output_csv, index=False)
-print(f"Top-90: 陨石={(template_df['label']==1).sum()} → {output_csv}")
+print(f"Top-90: meteorites={(template_df['label']==1).sum()} → {output_csv}")
 
 with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
     json.dump({
@@ -590,4 +590,4 @@ with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
         'pseudo_weight': PSEUDO_WEIGHT,
     }, f, indent=2, ensure_ascii=False)
 
-print("\n完成！")
+print("\n Done!")

@@ -30,11 +30,11 @@ print(f"TRAIN_DIR: {TRAIN_DIR}")
 print(f"TRAIN_DIR exists: {TRAIN_DIR.exists()}")
 TEST_DIR = ROOT / "test_images" / "test_images"
 
-# 设备
+# Device
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Device: {DEVICE}")
 
-# 加载 CLIP
+# Load CLIP
 from transformers import CLIPProcessor, CLIPModel
 
 model_id = "openai/clip-vit-base-patch32"

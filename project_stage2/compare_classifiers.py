@@ -1,6 +1,6 @@
 """
-DINOv2 ViT-L14 特征 + 多种分类器对比
-在同组 DINOv2 特征基础上，试不同分类器的效果
+DINOv2 ViT-L14 features with multiple classifiers
+Compare classifiers on a shared set of DINOv2 embeddings
 """
 from pathlib import Path
 import sys
@@ -31,7 +31,7 @@ from lightgbm import LGBMClassifier
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 配置
+# Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 FEATURES_DIR = DATA_ROOT / "runs" / "dinov2_features"
@@ -59,7 +59,7 @@ set_seed(SEED)
 
 
 # ==========================================
-# 数据集类和数据加载 (精简版，与之前相同)
+# Dataset and loading (simplified implementation)
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):
@@ -86,7 +86,7 @@ def _resolve_image_dir(root, split):
     for c in candidates:
         if c.is_dir():
             return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -196,7 +196,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
               .drop_duplicates(subset=md5_group_col, keep='first')
               .reset_index(drop=True).copy())
     dhash_list, failed_paths = [], []
-    for image_path in tqdm(rep_df[path_col].tolist(), desc='计算 dHash'):
+    for image_path in tqdm(rep_df[path_col].tolist(), desc='Compute dHash'):
         try:
             dhash_list.append(compute_dhash_int(image_path))
         except Exception:
@@ -208,7 +208,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
     valid_rep_df['dhash'] = valid_rep_df['dhash'].map(int)
     n = len(valid_rep_df)
     uf = UnionFind(n)
-    for i in tqdm(range(n), desc='构建 near-duplicate family'):
+    for i in tqdm(range(n), desc='Build near-duplicate family'):
         hi = valid_rep_df.loc[i, 'dhash']
         for j in range(i + 1, n):
             if hamming_distance_int(hi, valid_rep_df.loc[j, 'dhash']) <= threshold:
@@ -244,34 +244,34 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
 
 
 # ==========================================
-# 1. 加载/提取特征
+# 1. Load or extract features
 # ==========================================
 print("\n" + "=" * 60)
-print("数据预处理与特征提取")
+print("Preprocessing and feature extraction")
 print("=" * 60)
 
 train_feat_path = FEATURES_DIR / "train_features.npz"
 test_feat_path = FEATURES_DIR / "test_features.npz"
 
 if train_feat_path.exists() and test_feat_path.exists():
-    print("从缓存加载已有特征...")
+    print("Loading cached features...")
     train_data = np.load(train_feat_path)
     train_X = train_data['X']
     train_y = train_data['y']
     test_data = np.load(test_feat_path)
     test_X = test_data['X']
     test_ids = test_data['ids'].tolist()
-    print(f"训练特征: {train_X.shape}, 测试特征: {test_X.shape}")
+    print(f"Training features: {train_X.shape}, Test features: {test_X.shape}")
 else:
-    print("重新提取特征...")
+    print("Extract features again...")
 
-    # 加载模型
+    # Load model
     dinov2_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
     dinov2_model.eval()
     dinov2_model.to(DEVICE)
-    print("DINOv2 ViT-L14 已加载")
+    print("DINOv2 ViT-L14 loaded")
 
-    # 加载数据
+    # Load data
     full_train_df = load_train_dataframe(DATA_ROOT)
     train_pool_df = attach_md5_group_ids(full_train_df)
     train_pool_df, _, _ = build_near_duplicate_families_from_md5_groups(train_pool_df, md5_group_col='group_id', threshold=6)
@@ -304,12 +304,12 @@ else:
             return all_embeddings, all_paths
         return all_embeddings, np.array(all_labels)
 
-    # 提取训练特征
+    # Extract training features
     train_dataset = MeteoriteDataset(train_df, transforms=base_transform)
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     train_X, train_y = extract_embeddings(train_loader, dinov2_model, DEVICE, is_test=False)
 
-    # TTA 提取测试特征
+    # TTA Extract test features
     tta_transforms = [
         base_transform,
         transforms.Compose([transforms.RandomHorizontalFlip(p=1.0), base_transform]),
@@ -325,26 +325,26 @@ else:
     test_X = normalize(test_X, norm='l2', axis=1)
     test_ids = ids
 
-    # 缓存特征
+    # Cache features
     np.savez_compressed(train_feat_path, X=train_X, y=train_y)
     np.savez_compressed(test_feat_path, X=test_X, ids=np.array(test_ids))
-    print(f"特征已缓存到 {FEATURES_DIR}")
+    print(f"Features cached at {FEATURES_DIR}")
 
-print(f"\n训练集: {train_X.shape}, 标签分布: {np.bincount(train_y.astype(int))}")
-print(f"测试集: {test_X.shape}")
+print(f"\n Training set: {train_X.shape}, Class distribution: {np.bincount(train_y.astype(int))}")
+print(f"Test set: {test_X.shape}")
 
 # ==========================================
-# 2. 定义所有分类器
+# 2. Define candidate classifiers
 # ==========================================
 print("\n" + "=" * 60)
-print("5折交叉验证 + 多分类器对比")
+print("5 fold cross-validation and classifier comparison")
 print("=" * 60)
 
 n_splits = 5
 skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
 
 classifiers = {
-    # 线性模型
+    # Linear models
     "LogisticRegression": make_pipeline(
         StandardScaler(),
         LogisticRegression(max_iter=2000, class_weight='balanced', random_state=SEED)
@@ -367,7 +367,7 @@ classifiers = {
         StandardScaler(),
         KNeighborsClassifier(n_neighbors=15, weights='distance', metric='euclidean')
     ),
-    # 树模型
+    # Tree models
     "RandomForest": RandomForestClassifier(
         n_estimators=300, max_depth=15, class_weight='balanced',
         random_state=SEED, n_jobs=-1
@@ -395,7 +395,7 @@ results = []
 for name, clf in classifiers.items():
     print(f"\n--- {name} ---")
 
-    # 5折交叉验证
+    # 5 fold cross-validation
     val_accs, val_f1s = [], []
     test_pred = np.zeros(len(test_X))
 
@@ -405,7 +405,7 @@ for name, clf in classifiers.items():
 
         clf.fit(X_tr, y_tr)
 
-        # 验证集评估
+        # Validation evaluation
         val_pred = clf.predict(X_val)
         val_acc = (val_pred == y_val).mean()
         tp = ((val_pred == 1) & (y_val == 1)).sum()
@@ -416,7 +416,7 @@ for name, clf in classifiers.items():
         val_accs.append(val_acc)
         val_f1s.append(val_f1)
 
-        # 测试集预测（概率平均）
+        # Test predictions (average probabilities)
         test_pred += clf.predict_proba(test_X)[:, 1] / n_splits
 
     mean_acc = np.mean(val_accs)
@@ -439,10 +439,10 @@ for name, clf in classifiers.items():
     print(f"  Val F1:  {mean_f1:.4f} ± {std_f1:.4f}")
 
 # ==========================================
-# 3. 对比结果展示
+# 3. Compare results
 # ==========================================
 print("\n" + "=" * 60)
-print("分类器对比结果（按 Val F1 排序）")
+print("Classifier comparison (sorted by validation F1)")
 print("=" * 60)
 
 results_df = pd.DataFrame(results).sort_values('val_f1_mean', ascending=False)
@@ -451,18 +451,18 @@ print("-" * 50)
 for _, row in results_df.iterrows():
     print(f"{row['name']:<25s} {row['val_f1_mean']:.4f}±{row['val_f1_std']:.4f}  {row['val_acc_mean']:.4f}±{row['val_acc_std']:.4f}")
 
-# 保存完整结果
+# Save full results
 results_df.to_csv(OUTPUT_DIR / 'classifier_comparison.csv', index=False)
-print(f"\n对比结果已保存: {OUTPUT_DIR / 'classifier_comparison.csv'}")
+print(f"\n Comparison results saved: {OUTPUT_DIR / 'classifier_comparison.csv'}")
 
 # ==========================================
-# 4. 生成 Top-3 分类器的提交文件
+# 4. Write submissions for the top three classifiers
 # ==========================================
 print("\n" + "=" * 60)
-print("生成 Top-3 分类器的提交文件")
+print("Write submissions for the top three classifiers")
 print("=" * 60)
 
-# 从交叉验证找出最好的3个，重新训练并生成提交
+# Refit the three highest-ranked classifiers from cross-validation
 top3_names = results_df.head(3)['name'].tolist()
 
 for rank, name in enumerate(top3_names):
@@ -471,7 +471,7 @@ for rank, name in enumerate(top3_names):
     clf = classifiers[name]
     clf.fit(train_X, train_y)
 
-    # 5折概率平均预测
+    # 5 fold probability average
     test_pred = np.zeros(len(test_X))
     for fold, (train_idx, val_idx) in enumerate(skf.split(train_X, train_y)):
         X_tr, y_tr = train_X[train_idx], train_y[train_idx]
@@ -495,12 +495,12 @@ for rank, name in enumerate(top3_names):
         safe_name = name.replace(' ', '_').replace('(', '').replace(')', '')
         output_csv = OUTPUT_DIR / f'submission_{safe_name}_top{top_k}.csv'
         template_df.to_csv(output_csv, index=False)
-        print(f"  top_{top_k}: {int(sub_df[f'label_{top_k}'].sum())} 正类 -> {output_csv.name}")
+        print(f"  top_{top_k}: {int(sub_df[f'label_{top_k}'].sum())} positives -> {output_csv.name}")
 
 # ==========================================
-# 5. 集成 Top-3
+# 5. ensemble Top-3
 # ==========================================
-print(f"\n--- 集成 Top-3 分类器 ---")
+print(f"\n--- Ensemble the three best classifiers ---")
 ensemble_pred = np.zeros(len(test_X))
 for name in top3_names:
     clf = classifiers[name]
@@ -515,7 +515,7 @@ clean_ids = [Path(p).name for p in test_ids]
 sub_df = pd.DataFrame({'id': clean_ids, 'prob': ensemble_pred})
 sub_df = sub_df.sort_values('prob', ascending=False).reset_index(drop=True)
 
-# 保存集成概率
+# Save ensemble probabilities
 sub_df.to_csv(OUTPUT_DIR / 'test_pred_probs_ensemble_top3.csv', index=False, encoding='utf-8-sig')
 
 for top_k in [75, 80, 85]:
@@ -528,7 +528,7 @@ for top_k in [75, 80, 85]:
 
     output_csv = OUTPUT_DIR / f'submission_ensemble_top3_top{top_k}.csv'
     template_df.to_csv(output_csv, index=False)
-    print(f"  集成 top_{top_k}: {int(sub_df['label'].sum())} 正类 -> {output_csv.name}")
+    print(f"  ensemble top_{top_k}: {int(sub_df['label'].sum())} positives -> {output_csv.name}")
 
-print("\n🎉 全部完成！")
-print(f"所有输出: {OUTPUT_DIR}")
+print("\n🎉 Finished!")
+print(f"Outputs: {OUTPUT_DIR}")

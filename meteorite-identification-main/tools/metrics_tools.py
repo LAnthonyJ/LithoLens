@@ -3,11 +3,11 @@
 
 def binary_classification_report(logits: torch.Tensor, labels: torch.Tensor):
     """
-    计算二分类常用指标: Accuracy 与 F1。
+    Compute binary classification metrics: accuracy and F1.
 
-    说明:
-    - logits: 模型输出，形状 [B, 2]
-    - labels: 真实标签，形状 [B]
+    Notes:
+    - logits: model output of shape [B, 2]
+    - labels: ground-truth labels of shape [B]
     """
     preds = torch.argmax(logits, dim=1)
 

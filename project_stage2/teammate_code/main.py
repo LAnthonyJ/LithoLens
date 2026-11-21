@@ -79,7 +79,7 @@ if __name__ == '__main__':
     parser.add_argument('--decay', '-d', type=float, default=1e-3, help='Weight decay (L2 penalty).')
     
     parser.add_argument('--non_meteorite_weight', type=float, default=2.0, 
-                        help='非陨石类别的损失权重 (陨石固定为 1.0)。因为测试集中非陨石比例比训练集大很多，增加该值会让模型更关注非陨石样本，提升模型对非陨石的识别能力。 4.45 may be better')
+                        help='Loss weight for non-meteorites (meteorites use 1.0). Increase this weight to emphasize negatives when their test prevalence exceeds their training prevalence. 4.45 may be better')
 
     parser.add_argument('--num_workers', type=int, default=8, help='Number of threads for dataloader.')
 
@@ -98,35 +98,35 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # ---------------- 1. 数据集准备与自定义划分 ----------------
+    # ---------------- 1. Prepare and split the dataset ----------------
     if args.epochs > 0:
         full_train_data, num_classes = build_dataset(args.data_path, "train")
         
-        # 获取底层 DataFrame
+        # Get the underlying DataFrame
         df = full_train_data.df
         
-        # 分离出非陨石(class 0)和陨石(class 1)的原始索引
+        # Separate indices for terrestrial rocks (0) and meteorites (1)
         class0_indices = df[df['label'] == 0].index.values
         class1_indices = df[df['label'] == 1].index.values
 
-        # 打乱索引以保证随机性
+        # Shuffle the indices
         np.random.shuffle(class0_indices)
         np.random.shuffle(class1_indices)
 
-        # 设定验证集占总训练集数据的 10%
+        # Set the validation fraction to 10%
         val_total = int(0.1 * len(full_train_data))
         
-        # 强制验证集比例为 非陨石 : 陨石 = 4 : 1
+        # Set the validation ratio of terrestrial rocks to meteorites = 4 : 1
         val_class1_count = val_total // 5
         val_class0_count = val_class1_count * 4
 
-        # 划分验证集索引
+        # Select validation indices
         val_idx = np.concatenate([
             class0_indices[:val_class0_count], 
             class1_indices[:val_class1_count]
         ])
         
-        # 剩余的全部作为训练集
+        # Use all remaining indices for training
         train_idx = np.concatenate([
             class0_indices[val_class0_count:], 
             class1_indices[val_class1_count:]
@@ -151,7 +151,7 @@ if __name__ == '__main__':
         test_data, batch_size=args.test_bs, shuffle=False,
         num_workers=args.num_workers)
 
-    # ---------------- 2. 构建与加载模型 ----------------
+    # ---------------- 2. Build and load the model ----------------
     net = build_model(args, device=device, num_classes=num_classes)
 
     if args.load_model_path is not None:
@@ -160,14 +160,14 @@ if __name__ == '__main__':
 
     best_threshold = 0.5
 
-    # ---------------- 3. 训练与验证逻辑 ----------------
+    # ---------------- 3. Train and validate ----------------
     if args.epochs > 0:
         print("----------------Training & Validation--------------------\n")
 
         optimizer = optim.AdamW(net.parameters(), lr=args.learning_rate, weight_decay=args.decay)
         scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
         
-        # ---------- 修改处：非陨石为 args.non_meteorite_weight，陨石为 1.0 ----------
+        # ---------- Assign non-meteorites args.non_meteorite_weight and meteorites 1.0 ----------
         if args.loss == 'ce':
             class_weights = torch.FloatTensor([args.non_meteorite_weight, 1.0]).to(device)
             criterion = nn.CrossEntropyLoss(weight=class_weights)
@@ -249,7 +249,7 @@ if __name__ == '__main__':
             net.load_state_dict(best_model_state)
             net = net.to(device)
 
-    # ---------------- 4. 测试集推理逻辑 ----------------
+    # ---------------- 4. Run test inference ----------------
     print("\n----------------Testing--------------------")
     current_time = time.strftime("%Y%m%d_%H%M%S")
     os.makedirs("./result", exist_ok=True)

@@ -1,9 +1,9 @@
 """
-DINOv2 ViT-L14 + 表面异质性检测
-针对"长尾夹被误判为陨石"问题：
-- 局部方差图：度量表面纹理密度 → 陨石(高方差/多裂纹气印) vs 长尾夹(低方差/光滑均匀)
-- 局部熵图：度量表面混乱度 → 陨石(混乱) vs 人造物(规整)
-- 用纹理特征图作为额外TTA视角，让分类器学会区分"真纹理"和"伪纹理"
+DINOv2 ViT-L14 + Surface heterogeneity detection
+Investigate binder clips misclassified as meteorites:
+- Local variance map: compare rough, cracked specimens with smooth clips (lower variance)
+- Local entropy map: compare irregular surfaces with uniform manufactured objects (lower entropy)
+- Use texture maps as extra TTA views to distinguish different surface patterns"
 """
 from pathlib import Path
 import sys
@@ -29,7 +29,7 @@ from sklearn.pipeline import make_pipeline
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 0. 配置
+# 0. Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 PROB_FILE = DATA_ROOT / "dinov2_simple_output" / "test_probs_dinov2.csv"
@@ -61,13 +61,13 @@ set_seed(SEED)
 
 
 # ==========================================
-# 1. 表面异质性特征图 — 区分陨石纹理 vs 光滑人造物
+# 1. Surface heterogeneity maps for rough specimens and smooth manufactured objects
 # ==========================================
 def local_std_map(image, window_size=11):
     """
-    局部标准差图 — 度量表面纹理密度。
-    陨石：微裂纹、气印产生高局部方差 → 亮区多
-    长尾夹/光滑人造物：均匀表面 → 暗区为主
+    Local standard deviation measures surface variation.
+    Cracks and depressions can produce bright, high-variation regions
+    Uniform surfaces on binder clips and other objects typically appear darker
     """
     import cv2
     gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY).astype(np.float64)
@@ -81,13 +81,13 @@ def local_std_map(image, window_size=11):
 
 def local_entropy_map(image, window_size=11):
     """
-    局部熵图 — 度量表面混乱度。
-    陨石：不规则纹理 → 高熵
-    人造物(长尾夹)：规则/均匀 → 低熵
+    Local entropy measures variation in intensity.
+    Irregular surfaces can yield higher entropy
+    Uniform manufactured surfaces can yield lower entropy
     """
     import cv2
     gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY)
-    # 用局部直方图近似熵
+    # Estimate entropy with a local histogram
     pad = window_size // 2
     gray_padded = np.pad(gray, pad, mode='reflect')
     entropy = np.zeros_like(gray, dtype=np.float64)
@@ -104,13 +104,13 @@ def local_entropy_map(image, window_size=11):
 
 def texture_energy_map(image):
     """
-    综合纹理能量图：局部标准差 × 局部熵的几何平均。
-    两者同时高 → 真陨石纹理；一高一低或双低 → 非陨石。
+    Combine local deviation and entropy using their geometric mean.
+    High values in both channels emphasize irregular texture.
     """
     import cv2
     gray = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2GRAY).astype(np.float64)
 
-    # 快速局部标准差
+    # Fast local standard deviation
     window_size = 11
     mean = cv2.blur(gray, (window_size, window_size))
     mean_sq = cv2.blur(gray ** 2, (window_size, window_size))
@@ -118,14 +118,14 @@ def texture_energy_map(image):
     std = np.sqrt(var)
     std_norm = std / (std.max() + 1e-8)
 
-    # 归一化后几何平均 → 信号更干净
-    energy = np.sqrt(std_norm)  # sqrt压缩动态范围，突出中等纹理
+    # Normalize before taking the geometric mean
+    energy = np.sqrt(std_norm)  # sqrt Compress the dynamic range to emphasize intermediate texture
     energy_norm = (energy / (energy.max() + 1e-8) * 255).astype(np.uint8)
     return Image.fromarray(np.stack([energy_norm, energy_norm, energy_norm], axis=-1))
 
 
 # ==========================================
-# 2. 数据集类
+# 2. Dataset class
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):
@@ -148,14 +148,14 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 
 
 # ==========================================
-# 3. 数据加载与去重 (与之前相同)
+# 3. Load and deduplicate (original procedure)
 # ==========================================
 def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir():
             return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -286,7 +286,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
     rep_df = (df.sort_values([md5_group_col, path_col])
               .drop_duplicates(subset=md5_group_col, keep='first').reset_index(drop=True).copy())
     dhash_list, failed_paths = [], []
-    for image_path in tqdm(rep_df[path_col].tolist(), desc='计算 dHash'):
+    for image_path in tqdm(rep_df[path_col].tolist(), desc='Compute dHash'):
         try:
             dhash_list.append(compute_dhash_int(image_path))
         except Exception:
@@ -298,7 +298,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
     valid_rep_df['dhash'] = valid_rep_df['dhash'].map(int)
     n = len(valid_rep_df)
     uf = UnionFind(n)
-    for i in tqdm(range(n), desc='构建 near-duplicate family'):
+    for i in tqdm(range(n), desc='Build near-duplicate family'):
         hi = valid_rep_df.loc[i, 'dhash']
         for j in range(i + 1, n):
             if hamming_distance_int(hi, valid_rep_df.loc[j, 'dhash']) <= threshold:
@@ -334,25 +334,25 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
 
 
 # ==========================================
-# 4. 加载数据
+# 4. Load data
 # ==========================================
 print("\n" + "=" * 60)
-print("数据加载")
+print("Load data")
 print("=" * 60)
 
 real_train_df = load_train_dataframe(DATA_ROOT)
-print(f"真实训练样本: {len(real_train_df)}")
+print(f"Labeled training samples: {len(real_train_df)}")
 
 pseudo_df = load_pseudo_labeled_data(DATA_ROOT, PROB_FILE, PSEUDO_TOP_N, PSEUDO_BOTTOM_N)
-print(f"伪标签: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}陨石 + Bottom-{PSEUDO_BOTTOM_N}非陨石)")
+print(f"Pseudo-labels: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}meteorites + Bottom-{PSEUDO_BOTTOM_N}non-meteorites)")
 
 full_train_df = pd.concat([real_train_df, pseudo_df], ignore_index=True)
 
 # ==========================================
-# 5. 去重与切分
+# 5. Deduplicate and split
 # ==========================================
 print("\n" + "=" * 60)
-print("去重 + 划分")
+print("Deduplicate and split")
 print("=" * 60)
 
 train_pool_df = attach_md5_group_ids(full_train_df)
@@ -363,7 +363,7 @@ if overlap:
     train_pool_df = train_pool_df[
         ~((train_pool_df['source'] == 'pseudo') & (train_pool_df['group_id'].isin(overlap)))
     ].copy()
-    print(f"移除 {len(overlap)} 个重复伪标签")
+    print(f"Remove {len(overlap)} duplicate pseudo-labels")
 
 train_pool_df, _, _ = build_near_duplicate_families_from_md5_groups(
     train_pool_df, md5_group_col='group_id', threshold=6
@@ -381,23 +381,23 @@ train_df = pd.concat([real_train_split, pseudo_pool_df], ignore_index=True)
 train_df, removed = drop_exact_duplicates_in_train(train_df)
 val_df, _ = drop_exact_duplicates_in_train(val_df)
 
-print(f"Train: {len(train_df)}, Val: {len(val_df)}, 去重移除: {removed}")
-print(f"Train 类别: {train_df['label'].value_counts().sort_index().to_dict()}")
+print(f"Train: {len(train_df)}, Val: {len(val_df)}, Duplicates removed: {removed}")
+print(f"Train classes: {train_df['label'].value_counts().sort_index().to_dict()}")
 
 # ==========================================
-# 6. 加载 DINOv2
+# 6. Load DINOv2
 # ==========================================
 print("\n" + "=" * 60)
-print("加载 DINOv2 ViT-L14")
+print("Load DINOv2 ViT-L14")
 print("=" * 60)
 
 dinov2_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
 dinov2_model.eval()
 dinov2_model.to(DEVICE)
-print("DINOv2 加载完毕")
+print("DINOv2 loaded")
 
 # ==========================================
-# 7. Transform 和 TTA 配置
+# 7. Transform and TTA settings
 # ==========================================
 base_transform = transforms.Compose([
     transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
@@ -408,7 +408,7 @@ base_transform = transforms.Compose([
 
 
 class TransformWithPreprocess:
-    """先PIL预处理，再torchvision transform"""
+    """Apply PIL preprocessing before torchvision transform"""
     def __init__(self, preprocessor, base_tf):
         self.preprocessor = preprocessor
         self.base_tf = base_tf
@@ -418,14 +418,14 @@ class TransformWithPreprocess:
         return self.base_tf(image)
 
 
-# TTA 视图配置：
-# 原始+翻转(通用) + 局部方差(表面异质性) + 纹理能量(综合纹理)
+# TTA View settings:
+# Original and flipped views plus local variance and texture energy (combined texture)
 tta_configs = [
-    ("原始", None),
-    ("水平翻转", transforms.RandomHorizontalFlip(p=1.0)),
-    ("垂直翻转", transforms.RandomVerticalFlip(p=1.0)),
-    ("局部方差图", TransformWithPreprocess(local_std_map, base_transform)),
-    ("纹理能量图", TransformWithPreprocess(texture_energy_map, base_transform)),
+    ("original", None),
+    ("horizontal flip", transforms.RandomHorizontalFlip(p=1.0)),
+    ("vertical flip", transforms.RandomVerticalFlip(p=1.0)),
+    ("Local variance map", TransformWithPreprocess(local_std_map, base_transform)),
+    ("Texture energy map", TransformWithPreprocess(texture_energy_map, base_transform)),
 ]
 
 
@@ -448,29 +448,29 @@ def extract_embeddings(loader, model, device, is_test=False):
     return all_embeddings, np.array(all_labels)
 
 
-# 训练集特征（原始图像）
+# Training features (original images)
 print("\n" + "=" * 60)
-print("提取训练集特征")
+print("Extract training features")
 print("=" * 60)
 
 train_dataset = MeteoriteDataset(train_df, transforms=base_transform)
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 train_X, train_y = extract_embeddings(train_loader, dinov2_model, DEVICE, is_test=False)
-print(f"训练集特征: {train_X.shape}, 标签: {np.bincount(train_y.astype(int))}")
+print(f"Training features: {train_X.shape}, Labels: {np.bincount(train_y.astype(int))}")
 
 is_pseudo = (train_df['source'] == 'pseudo').values.astype(float)
 sample_weights = np.where(is_pseudo, PSEUDO_WEIGHT, 1.0)
-print(f"伪标签样本: {int(is_pseudo.sum())}, 权重: {PSEUDO_WEIGHT}x")
+print(f"Pseudo-labeled samples: {int(is_pseudo.sum())}, weight: {PSEUDO_WEIGHT}x")
 
 # ==========================================
-# 8. 纹理增强 TTA 测试集特征提取
+# 8. Extract texture-enhanced TTA test features
 # ==========================================
 print("\n" + "=" * 60)
-print(f"纹理TTA测试集特征提取 ({len(tta_configs)} 视角)")
+print(f"Extract test features with texture TTA ({len(tta_configs)} view)")
 print("=" * 60)
 
 test_df = load_test_dataframe(DATA_ROOT)
-print(f"测试集: {len(test_df)}")
+print(f"Test set: {len(test_df)}")
 
 test_X_tta_list = []
 for name, t in tta_configs:
@@ -488,13 +488,13 @@ for name, t in tta_configs:
 
 test_X = np.mean(test_X_tta_list, axis=0)
 test_X = normalize(test_X, norm='l2', axis=1)
-print(f"测试集特征: {test_X.shape} (融合 {len(tta_configs)} 视角)")
+print(f"Test features: {test_X.shape} (blend {len(tta_configs)} view)")
 
 # ==========================================
-# 9. 5折CV SVM + kNN (加权)
+# 9. 5 fold SVM + kNN cross-validation (weighted)
 # ==========================================
 print("\n" + "=" * 60)
-print(f"5折交叉验证 SVM + kNN (伪标签权重 {PSEUDO_WEIGHT}x)")
+print(f"5 fold SVM + kNN cross-validation (pseudo-label weight {PSEUDO_WEIGHT}x)")
 print("=" * 60)
 
 n_splits = 5
@@ -529,10 +529,10 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(train_X, train_y)):
     knn_test_preds += knn.predict_proba(test_X)[:, 1] / n_splits
 
 # ==========================================
-# 10. 融合 + 生成提交
+# 10. Blend scores and write submission
 # ==========================================
 print("\n" + "=" * 60)
-print("生成提交文件")
+print("Write the submission")
 print("=" * 60)
 
 final_scores = (svm_test_preds + knn_test_preds) / 2.0
@@ -543,7 +543,7 @@ sub_df = sub_df.sort_values(by='prob', ascending=False).reset_index(drop=True)
 
 probs_path = OUTPUT_DIR / 'test_probs_het.csv'
 sub_df.to_csv(probs_path, index=False, encoding='utf-8-sig')
-print(f"概率: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
+print(f"Probability: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
 
 sub_df['label'] = 0
 sub_df.loc[:89, 'label'] = 1
@@ -553,7 +553,7 @@ template_df['label'] = template_df['id'].map(sub_df.set_index('id')['label']).fi
 
 output_csv = OUTPUT_DIR / 'submission_het_top90.csv'
 template_df.to_csv(output_csv, index=False)
-print(f"Top-90: 陨石={(template_df['label']==1).sum()} → {output_csv}")
+print(f"Top-90: meteorites={(template_df['label']==1).sum()} → {output_csv}")
 
 with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
     json.dump({
@@ -566,4 +566,4 @@ with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
         'train_size': len(train_df), 'test_size': len(test_df),
     }, f, indent=2, ensure_ascii=False)
 
-print("\n完成！")
+print("\n Done!")

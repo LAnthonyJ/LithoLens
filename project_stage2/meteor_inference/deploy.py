@@ -1,4 +1,4 @@
-"""部署 Meteor-Mamba 到服务器并运行推理"""
+"""Deploy Meteor-Mamba and run inference on the server"""
 import paramiko
 import sys
 import os

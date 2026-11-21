@@ -1,5 +1,5 @@
 """
-快速分类器对比 — 加载缓存特征，迅速测试多种分类器
+Compare classifiers using cached features
 """
 from pathlib import Path
 import sys, json, pickle, random
@@ -27,9 +27,9 @@ print(f"OUTPUT: {OUTPUT_DIR}")
 sys.stdout.flush()
 
 # ==========================================
-# 加载缓存特征
+# Load cached features
 # ==========================================
-print("加载缓存特征...")
+print("Load cached features...")
 train_data = np.load(FEATURES_DIR / "train_features.npz")
 test_data = np.load(FEATURES_DIR / "test_features.npz")
 train_X = train_data['X']
@@ -41,7 +41,7 @@ print(f"Labels: {np.bincount(train_y)}")
 sys.stdout.flush()
 
 # ==========================================
-# 定义分类器（不含 SVM probability=True）
+# Define classifiers (excluding SVM probability=True)
 # ==========================================
 n_splits = 5
 skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=SEED)
@@ -86,11 +86,11 @@ for name, clf in classifiers.items():
         val_accs.append(val_acc)
         val_f1s.append(val_f1)
 
-        # 累加测试集概率
+        # Accumulate test probabilities
         if hasattr(clf, 'predict_proba'):
             test_pred += clf.predict_proba(test_X)[:, 1] / n_splits
         else:
-            # LinearSVC 没有 predict_proba,用 decision_function
+            # LinearSVC Without predict_proba, use decision_function
             d = clf.decision_function(test_X)
             test_pred += (1 / (1 + np.exp(-d))) / n_splits
 
@@ -110,10 +110,10 @@ for name, clf in classifiers.items():
     sys.stdout.flush()
 
 # ==========================================
-# 排序展示
+# Sort results
 # ==========================================
 print("\n" + "=" * 60)
-print("排名（按 Val F1）")
+print("Ranking (by Val F1)")
 print("=" * 60)
 results.sort(key=lambda r: r['val_f1'], reverse=True)
 for i, r in enumerate(results):
@@ -121,10 +121,10 @@ for i, r in enumerate(results):
 sys.stdout.flush()
 
 # ==========================================
-# 生成 Top-3 提交文件
+# Write submissions for the top three
 # ==========================================
 print("\n" + "=" * 60)
-print("生成提交文件 (top_k = 75, 80, 85)")
+print("Write the submission (top_k = 75, 80, 85)")
 print("=" * 60)
 
 clean_ids = [Path(p).name for p in test_ids]
@@ -145,9 +145,9 @@ for r in results[:3]:
     sys.stdout.flush()
 
 # ==========================================
-# 集成 Top-3
+# ensemble Top-3
 # ==========================================
-print("\n--- 集成 Top-3 ---")
+print("\n--- ensemble Top-3 ---")
 ensemble_pred = np.zeros(len(test_X))
 for r in results[:3]:
     ensemble_pred += r['test_pred'] / 3
@@ -163,12 +163,12 @@ for top_k in [75, 80, 85]:
     template['label'] = template['id'].map(sub_df.set_index('id')['label']).astype(int)
     csv_path = OUTPUT_DIR / f'submission_ensemble_top3_top{top_k}.csv'
     template.to_csv(csv_path, index=False)
-    print(f"  集成 top_{top_k}: {int(sub_df['label'].sum())} pos -> {csv_path.name}")
+    print(f"  ensemble top_{top_k}: {int(sub_df['label'].sum())} pos -> {csv_path.name}")
 sys.stdout.flush()
 
-# 保存摘要
+# Save summary
 summary = {r['name']: {'val_f1': r['val_f1'], 'val_acc': r['val_acc'], 'time_s': r['time']} for r in results}
 with open(OUTPUT_DIR / 'classifier_results.json', 'w') as f:
     json.dump(summary, f, indent=2)
 
-print(f"\n🎉 完成！输出: {OUTPUT_DIR}")
+print(f"\n🎉 Finished. Output: {OUTPUT_DIR}")

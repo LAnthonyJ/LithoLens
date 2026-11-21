@@ -40,11 +40,11 @@ def resolve_test_paths(root):
 class StoneDataset(Dataset):
     def __init__(self, root, split="train", transforms=None):
         """
-        root: 数据集根目录，例如 ./dataset
-        split: 'train' 或 'test'
-        transforms: 图像预处理变换
+        root: dataset root, e.g. ./dataset
+        split: 'train' or 'test'
+        transforms: image transform
 
-        当前目录结构应为：
+        Expected directory layout:
         root/
         |- train_images/
         |- train_labels.csv

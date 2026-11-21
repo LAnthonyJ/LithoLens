@@ -1,9 +1,9 @@
 """
-三模型融合 + 纹理特征混合分类器
-DINOv3-L (1024d) + SwinV2-L (1536d) + ConvNeXt-L (1536d) + 纹理特征(18d)
-→ 拼接 → SelectKBest → SVM/kNN
+Hybrid classifier combining three backbones and texture descriptors
+DINOv3-L (1024d) + SwinV2-L (1536d) + ConvNeXt-L (1536d) + Texture features(18d)
+→ concatenate → SelectKBest → SVM/kNN
 
-保留 train_dinov2_hybrid.py 的所有逻辑，仅替换模型部分
+Use the training logic from train_dinov2_hybrid.py with different backbones
 """
 from pathlib import Path
 import sys, json, hashlib, random, os
@@ -29,7 +29,7 @@ from sklearn.feature_selection import SelectKBest, f_classif
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 0. 配置
+# 0. Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 PROB_FILE = DATA_ROOT / "dinov2_simple_output" / "test_probs_dinov2.csv"
@@ -60,7 +60,7 @@ set_seed(SEED)
 
 
 # ==========================================
-# 1. 三模型加载
+# 1. Load three backbones
 # ==========================================
 MODELS_CONFIG = {
     'dinov3': {
@@ -108,7 +108,7 @@ def build_transform(cfg):
     ])
 
 print("\n" + "=" * 60)
-print("加载三模型")
+print("Loading three backbones")
 print("=" * 60)
 
 models = {}
@@ -118,7 +118,7 @@ for key, cfg in MODELS_CONFIG.items():
     transforms_dict[key] = build_transform(cfg)
 
 # ==========================================
-# 2. 显式纹理特征提取 (原封不动)
+# 2. Extract handcrafted texture features (original implementation)
 # ==========================================
 def compute_texture_features(image):
     import cv2
@@ -169,7 +169,7 @@ def compute_texture_features(image):
 
 def extract_texture_features_batch(image_paths):
     features_list = []
-    for path in tqdm(image_paths, desc='纹理特征'):
+    for path in tqdm(image_paths, desc='Texture features'):
         try:
             image = Image.open(path)
             image = ImageOps.exif_transpose(image).convert("RGB")
@@ -183,7 +183,7 @@ def extract_texture_features_batch(image_paths):
 
 
 # ==========================================
-# 3. 数据集类 (支持多模型多transform)
+# 3. Dataset supporting several models and transform)
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transform_dict=None, default_transform=None):
@@ -208,7 +208,7 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 
 
 # ==========================================
-# 4. 多模型特征提取
+# 4. Multi-backbone feature extraction
 # ==========================================
 @torch.no_grad()
 def extract_model_features(model, df, transform_fn, desc=""):
@@ -268,14 +268,14 @@ def extract_model_features_tta(model, df, transform_fn, desc=""):
 
 
 # ==========================================
-# 5. 数据加载与去重 (原封不动)
+# 5. Load and deduplicate data (original implementation)
 # ==========================================
 def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir():
             return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -437,22 +437,22 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
 
 
 # ==========================================
-# 6. 数据加载
+# 6. Load data
 # ==========================================
 print("\n" + "=" * 60)
-print("数据加载")
+print("Load data")
 print("=" * 60)
 
 real_train_df = load_train_dataframe(DATA_ROOT)
-print(f"真实训练样本: {len(real_train_df)}")
+print(f"Labeled training samples: {len(real_train_df)}")
 
 pseudo_df = load_pseudo_labeled_data(DATA_ROOT, PROB_FILE, PSEUDO_TOP_N, PSEUDO_BOTTOM_N)
-print(f"伪标签: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}陨石 + Bottom-{PSEUDO_BOTTOM_N}非陨石)")
+print(f"Pseudo-labels: {len(pseudo_df)} (Top-{PSEUDO_TOP_N}meteorites + Bottom-{PSEUDO_BOTTOM_N}non-meteorites)")
 
 full_train_df = pd.concat([real_train_df, pseudo_df], ignore_index=True)
 
 print("\n" + "=" * 60)
-print("去重 + 划分")
+print("Deduplicate and split")
 print("=" * 60)
 train_pool_df = attach_md5_group_ids(full_train_df)
 pseudo_groups = set(train_pool_df[train_pool_df['source'] == 'pseudo']['group_id'])
@@ -474,10 +474,10 @@ val_df, _ = drop_exact_duplicates_in_train(val_df)
 print(f"Train: {len(train_df)}, Val: {len(val_df)}")
 
 # ==========================================
-# 7. 三模型特征提取
+# 7. Extract features using three backbones
 # ==========================================
 print("\n" + "=" * 60)
-print("三模型特征提取")
+print("Extract features using three backbones")
 print("=" * 60)
 
 all_train_features = {}
@@ -485,7 +485,7 @@ all_test_features = {}
 
 # Load test dataframe for feature extraction
 test_df = load_test_dataframe(DATA_ROOT)
-print(f"测试样本: {len(test_df)}")
+print(f"Test samples: {len(test_df)}")
 
 for key in ['dinov3', 'swinv2', 'convnext']:
     model = models[key]
@@ -498,34 +498,34 @@ for key in ['dinov3', 'swinv2', 'convnext']:
     result = extract_model_features(model, train_df, tfm, desc=f"{key} train")
     X_train = result[0] if isinstance(result, tuple) else result
     all_train_features[key] = X_train
-    print(f"  训练特征: {X_train.shape}")
+    print(f"  Training features: {X_train.shape}")
 
     # Test features with TTA
     X_test = extract_model_features_tta(model, test_df, tfm, desc=f"{key} test TTA")
     all_test_features[key] = X_test
-    print(f"  测试特征: {X_test.shape}")
+    print(f"  Test features: {X_test.shape}")
 
 # Train labels (same for all models)
 train_y = train_df['label'].values
 
 # ==========================================
-# 8. 纹理特征提取
+# 8. Texture extraction
 # ==========================================
 print("\n" + "=" * 60)
-print("提取显式纹理特征")
+print("Extract handcrafted texture features")
 print("=" * 60)
 
 train_texture_feat = extract_texture_features_batch(train_df['img_path'].tolist())
-print(f"训练集纹理特征: {train_texture_feat.shape}")
+print(f"Training texture features: {train_texture_feat.shape}")
 
 test_texture_feat = extract_texture_features_batch(test_df['img_path'].tolist())
-print(f"测试集纹理特征: {test_texture_feat.shape}")
+print(f"Test texture features: {test_texture_feat.shape}")
 
 # ==========================================
-# 9. 特征融合
+# 9. Feature fusion
 # ==========================================
 print("\n" + "=" * 60)
-print("特征融合: DINOv3(1024d) + SwinV2(1536d) + ConvNeXt(1536d) + 纹理(18d)")
+print("Combine DINOv3 (1024d), SwinV2 (1536d), ConvNeXt (1536d) and texture(18d)")
 print("=" * 60)
 
 # L2 normalize each model's features
@@ -553,13 +553,13 @@ total_dim += train_texture_feat.shape[1]
 # Concatenate all
 train_X = np.concatenate(train_features_norm, axis=1)
 test_X = np.concatenate(test_features_norm, axis=1)
-print(f"  融合前总维度: {total_dim}")
+print(f"  Dimensions before fusion: {total_dim}")
 
 # Feature selection
 selector = SelectKBest(f_classif, k=min(1024, train_X.shape[1]))
 train_X = selector.fit_transform(train_X, train_y)
 test_X = selector.transform(test_X)
-print(f"  SelectKBest后: {train_X.shape[1]}d")
+print(f"  SelectKBest output: {train_X.shape[1]}d")
 
 # Final normalize
 train_X = normalize(train_X, norm='l2', axis=1)
@@ -568,14 +568,14 @@ test_X = normalize(test_X, norm='l2', axis=1)
 # Sample weights
 is_pseudo = (train_df['source'] == 'pseudo').values.astype(float)
 sample_weights = np.where(is_pseudo, PSEUDO_WEIGHT, 1.0)
-print(f"  伪标签样本: {int(is_pseudo.sum())}, 权重: {PSEUDO_WEIGHT}x")
-print(f"  最终: train_X={train_X.shape}, test_X={test_X.shape}")
+print(f"  Pseudo-labeled samples: {int(is_pseudo.sum())}, weight: {PSEUDO_WEIGHT}x")
+print(f"  Final: train_X={train_X.shape}, test_X={test_X.shape}")
 
 # ==========================================
-# 10. 5折CV SVM + kNN (加权，原封不动)
+# 10. 5 fold SVM + kNN cross-validation (original weights)
 # ==========================================
 print("\n" + "=" * 60)
-print("5折交叉验证 SVM + kNN (三模型+纹理)")
+print("5 fold SVM + kNN cross-validation (three backbones and texture)")
 print("=" * 60)
 
 n_splits = 5
@@ -610,10 +610,10 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(train_X, train_y)):
     knn_test_preds += knn.predict_proba(test_X)[:, 1] / n_splits
 
 # ==========================================
-# 11. 生成提交 (原封不动)
+# 11. Generate submission (original procedure)
 # ==========================================
 print("\n" + "=" * 60)
-print("生成提交文件")
+print("Write the submission")
 print("=" * 60)
 
 final_scores = (svm_test_preds + knn_test_preds) / 2.0
@@ -624,7 +624,7 @@ sub_df = sub_df.sort_values(by='prob', ascending=False).reset_index(drop=True)
 
 probs_path = OUTPUT_DIR / 'test_probs_triple_hybrid.csv'
 sub_df.to_csv(probs_path, index=False, encoding='utf-8-sig')
-print(f"概率: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
+print(f"Probability: min={sub_df['prob'].min():.4f} max={sub_df['prob'].max():.4f} mean={sub_df['prob'].mean():.4f}")
 
 sub_df['label'] = 0
 sub_df.loc[:89, 'label'] = 1
@@ -634,7 +634,7 @@ template_df['label'] = template_df['id'].map(sub_df.set_index('id')['label']).fi
 
 output_csv = OUTPUT_DIR / 'submission_triple_hybrid_top90.csv'
 template_df.to_csv(output_csv, index=False)
-print(f"Top-90: 陨石={(template_df['label']==1).sum()} → {output_csv}")
+print(f"Top-90: meteorites={(template_df['label']==1).sum()} → {output_csv}")
 
 with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
     json.dump({
@@ -651,4 +651,4 @@ with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
         'pseudo_weight': PSEUDO_WEIGHT,
     }, f, indent=2, ensure_ascii=False)
 
-print("\n完成！")
+print("\n Done!")

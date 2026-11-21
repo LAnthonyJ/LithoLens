@@ -5,17 +5,17 @@ def old_build_dataset(data_path, mode="train"):
     "The project is a binary classification problem. Thus, fix num_classes to 2."
     if mode == "train":
         train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(224, scale=(0.7, 1.0)), # 限制缩放比例，防止切出完全无背景的纯色块
+    transforms.RandomResizedCrop(224, scale=(0.7, 1.0)), # Limit the crop scale to avoid empty patches
     transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomVerticalFlip(p=0.5),                # 新增：垂直翻转
-    transforms.RandomRotation(degrees=180),              # 新增：任意角度旋转
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1), # 新增：颜色与光照抗扰动
+    transforms.RandomVerticalFlip(p=0.5),                # Vertical flip
+    transforms.RandomRotation(degrees=180),              # Rotate to arbitrary angles
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1), # Vary color and lighting
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    transforms.RandomErasing(p=0.2, scale=(0.02, 0.2))   # 新增：随机擦除，防止过拟合
+    transforms.RandomErasing(p=0.2, scale=(0.02, 0.2))   # Random erasing for regularization
 ])
 
-        # 修正了路径，添加了 is_test=False
+        # Update paths and set is_test=False
         train_dataset = MyDataset(
             img_dir=data_path + "/train_images",
             csv_path=data_path + "/train_labels.csv",
@@ -32,7 +32,7 @@ def old_build_dataset(data_path, mode="train"):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-        # 修改：使用 MyDataset 读取 test_images 和 sample_submission.csv
+        # Use MyDataset to read test_images and sample_submission.csv
         test_dataset = MyDataset(
             img_dir=data_path + "/test_images",
             csv_path=data_path + "/sample_submission.csv",

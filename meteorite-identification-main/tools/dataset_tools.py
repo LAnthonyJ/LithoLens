@@ -8,11 +8,11 @@
 
 # class MeteoriteDataset(Dataset):
 #     """
-#     通用数据集类。
+#     Generic image dataset.
 
-#     使用方式:
-#     - 训练/验证: dataframe 里需要有 label 列
-#     - 测试推理: dataframe 可以没有 label 列
+#     Usage:
+#     - Training and validation require a label column
+#     - Test inference accepts unlabeled rows
 #     """
 
 #     def __init__(self, dataframe: pd.DataFrame, transforms=None):
@@ -27,7 +27,7 @@
 #         row = self.df.iloc[index]
 #         img_path = row["img_path"]
 
-#         # EXIF 矫正 + RGB 统一，避免方向和通道格式问题
+#         # EXIF orientation correction and RGB conversion
 #         image = Image.open(img_path)
 #         image = ImageOps.exif_transpose(image).convert("RGB")
 
@@ -41,7 +41,7 @@
 
 # def _resolve_image_dir(root: Path, split: str) -> Path:
 #     """
-#     同时兼容两种目录:
+#     Support both directory layouts:
 #     1) split_images/split_images/*.jpg
 #     2) split_images/*.jpg
 #     """
@@ -52,28 +52,28 @@
 #     for candidate in candidates:
 #         if candidate.is_dir():
 #             return candidate
-#     raise FileNotFoundError(f"找不到 {split} 图片目录，已尝试: {candidates}")
+#     raise FileNotFoundError(f"Missing {split} image directory; tried: {candidates}")
 
 
 # def load_train_dataframe(data_root: Path) -> pd.DataFrame:
-#     """读取训练标签并拼接图片完整路径。"""
+#     """Read training labels and resolve image paths."""
 #     data_root = Path(data_root)
 #     csv_path = data_root / "train_labels.csv"
 #     if not csv_path.exists():
-#         raise FileNotFoundError(f"未找到训练标签文件: {csv_path}")
+#         raise FileNotFoundError(f"Training labels missing: {csv_path}")
 
 #     train_dir = _resolve_image_dir(data_root, "train")
 #     df = pd.read_csv(csv_path)
 #     if "id" not in df.columns or "label" not in df.columns:
-#         raise ValueError("train_labels.csv 必须包含 id 和 label 两列")
+#         raise ValueError("train_labels.csv must contain id and label columns")
 
 #     df["img_path"] = df["id"].apply(lambda x: str(train_dir / x))
 
-#     # 过滤掉路径不存在的样本，防止训练中断
+#     # Skip missing images before training
 #     exists_mask = df["img_path"].apply(lambda p: Path(p).exists())
 #     missing_count = int((~exists_mask).sum())
 #     if missing_count > 0:
-#         print(f"[警告] 有 {missing_count} 条训练样本找不到图片，将自动跳过")
+#         print(f"[Warning] {missing_count} training images missing; skipping")
 #     df = df[exists_mask].copy()
 
 #     df["label"] = df["label"].astype(int)
@@ -81,16 +81,16 @@
 
 
 # def load_test_dataframe(data_root: Path) -> pd.DataFrame:
-#     """读取测试集 id，并拼接图片完整路径。"""
+#     """Read test IDs and resolve image paths."""
 #     data_root = Path(data_root)
 #     csv_path = data_root / "sample_submission.csv"
 #     if not csv_path.exists():
-#         raise FileNotFoundError(f"未找到 sample_submission.csv: {csv_path}")
+#         raise FileNotFoundError(f"Missing sample_submission.csv: {csv_path}")
 
 #     test_dir = _resolve_image_dir(data_root, "test")
 #     df = pd.read_csv(csv_path)
 #     if "id" not in df.columns:
-#         raise ValueError("sample_submission.csv 必须包含 id 列")
+#         raise ValueError("sample_submission.csv must contain an id column")
 
 #     df = df[["id"]].copy()
 #     df["img_path"] = df["id"].apply(lambda x: str(test_dir / x))
@@ -98,7 +98,7 @@
 #     exists_mask = df["img_path"].apply(lambda p: Path(p).exists())
 #     missing_count = int((~exists_mask).sum())
 #     if missing_count > 0:
-#         print(f"[警告] 有 {missing_count} 条测试样本找不到图片，将自动跳过")
+#         print(f"[Warning] {missing_count} test images missing; skipping")
 #     df = df[exists_mask].copy()
 
 #     return df
@@ -111,10 +111,10 @@
 #     seed: int = 42,
 # ) -> pd.DataFrame:
 #     """
-#     按类别比例抽样，避免抽样后类别极度失衡。
+#     Sample in proportion to class size.
 
-#     - sample_size 为 None 或 <=0 时，返回原始 df
-#     - sample_size 大于总样本数时，也返回原始 df
+#     - sample_size of None or <=0 returns the original df
+#     - sample_size larger than the dataset also returns the original df
 #     """
 #     if sample_size is None or sample_size <= 0 or sample_size >= len(df):
 #         return df.copy()
@@ -122,13 +122,13 @@
 #     sampled_parts = []
 #     class_counts = df[label_col].value_counts().sort_index()
 
-#     # 先按比例计算每类最少抽取数量
+#     # Allocate samples to each class proportionally
 #     allocated = {}
 #     for cls, count in class_counts.items():
 #         ratio = count / len(df)
 #         allocated[cls] = max(1, int(round(sample_size * ratio)))
 
-#     # 调整总数，使其精确等于 sample_size
+#     # Adjust the total to match sample_size
 #     total_alloc = sum(allocated.values())
 #     classes = list(class_counts.index)
 #     idx = 0
@@ -162,11 +162,11 @@
 #     seed: int = 42,
 # ):
 #     """
-#     按类别分层切分 train/val。
-#     这样每个类别在训练集和验证集里都尽量有代表性。
+#     Stratify by class when splitting train/val.
+#     Keep each class represented in both partitions.
 #     """
 #     if not (0.0 < val_ratio < 1.0):
-#         raise ValueError("val_ratio 必须在 (0, 1) 范围内")
+#         raise ValueError("val_ratio must be within (0, 1)")
 
 #     train_parts = []
 #     val_parts = []
@@ -176,7 +176,7 @@
 #         n_total = len(cls_df)
 #         n_val = max(1, int(round(n_total * val_ratio)))
 
-#         # 保证至少留 1 个样本在训练集
+#         # Keep at least one training sample per class
 #         if n_val >= n_total:
 #             n_val = n_total - 1
 
@@ -189,7 +189,7 @@
 #     val_df = pd.concat(val_parts).sample(frac=1.0, random_state=seed).reset_index(drop=True)
 #     return train_df, val_df
 
-####第二版：按重复图分组切分####
+####Version 2: split by duplicate group####
 from pathlib import Path
 from typing import Optional
 import hashlib
@@ -204,11 +204,11 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class MeteoriteDataset(Dataset):
     """
-    通用数据集类。
+    Generic image dataset.
 
-    使用方式:
-    - 训练/验证: dataframe 里需要有 label 列
-    - 测试推理: dataframe 可以没有 label 列
+    Usage:
+    - Training and validation require a label column
+    - Test inference accepts unlabeled rows
     """
 
     def __init__(self, dataframe: pd.DataFrame, transforms=None):
@@ -223,7 +223,7 @@ class MeteoriteDataset(Dataset):
         row = self.df.iloc[index]
         img_path = row["img_path"]
 
-        # EXIF 矫正 + RGB 统一，避免方向和通道格式问题
+        # EXIF orientation correction and RGB conversion
         image = Image.open(img_path)
         image = ImageOps.exif_transpose(image).convert("RGB")
 
@@ -237,7 +237,7 @@ class MeteoriteDataset(Dataset):
 
 def _resolve_image_dir(root: Path, split: str) -> Path:
     """
-    同时兼容两种目录:
+    Support both directory layouts:
     1) split_images/split_images/*.jpg
     2) split_images/*.jpg
     """
@@ -248,27 +248,27 @@ def _resolve_image_dir(root: Path, split: str) -> Path:
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError(f"找不到 {split} 图片目录，已尝试: {candidates}")
+    raise FileNotFoundError(f"Missing {split} image directory; tried: {candidates}")
 
 
 def load_train_dataframe(data_root: Path) -> pd.DataFrame:
-    """读取训练标签并拼接图片完整路径。"""
+    """Read training labels and resolve image paths."""
     data_root = Path(data_root)
     csv_path = data_root / "train_labels.csv"
     if not csv_path.exists():
-        raise FileNotFoundError(f"未找到训练标签文件: {csv_path}")
+        raise FileNotFoundError(f"Training labels missing: {csv_path}")
 
     train_dir = _resolve_image_dir(data_root, "train")
     df = pd.read_csv(csv_path)
     if "id" not in df.columns or "label" not in df.columns:
-        raise ValueError("train_labels.csv 必须包含 id 和 label 两列")
+        raise ValueError("train_labels.csv must contain id and label columns")
 
     df["img_path"] = df["id"].apply(lambda x: str(train_dir / x))
 
     exists_mask = df["img_path"].apply(lambda p: Path(p).exists())
     missing_count = int((~exists_mask).sum())
     if missing_count > 0:
-        print(f"[警告] 有 {missing_count} 条训练样本找不到图片，将自动跳过")
+        print(f"[Warning] {missing_count} training images missing; skipping")
     df = df[exists_mask].copy()
 
     df["label"] = df["label"].astype(int)
@@ -276,16 +276,16 @@ def load_train_dataframe(data_root: Path) -> pd.DataFrame:
 
 
 def load_test_dataframe(data_root: Path) -> pd.DataFrame:
-    """读取测试集 id，并拼接图片完整路径。"""
+    """Read test IDs and resolve image paths."""
     data_root = Path(data_root)
     csv_path = data_root / "sample_submission.csv"
     if not csv_path.exists():
-        raise FileNotFoundError(f"未找到 sample_submission.csv: {csv_path}")
+        raise FileNotFoundError(f"Missing sample_submission.csv: {csv_path}")
 
     test_dir = _resolve_image_dir(data_root, "test")
     df = pd.read_csv(csv_path)
     if "id" not in df.columns:
-        raise ValueError("sample_submission.csv 必须包含 id 列")
+        raise ValueError("sample_submission.csv must contain an id column")
 
     df = df[["id"]].copy()
     df["img_path"] = df["id"].apply(lambda x: str(test_dir / x))
@@ -293,7 +293,7 @@ def load_test_dataframe(data_root: Path) -> pd.DataFrame:
     exists_mask = df["img_path"].apply(lambda p: Path(p).exists())
     missing_count = int((~exists_mask).sum())
     if missing_count > 0:
-        print(f"[警告] 有 {missing_count} 条测试样本找不到图片，将自动跳过")
+        print(f"[Warning] {missing_count} test images missing; skipping")
     df = df[exists_mask].copy()
 
     return df
@@ -306,7 +306,7 @@ def stratified_sample_dataframe(
     seed: int = 42,
 ) -> pd.DataFrame:
     """
-    按类别比例抽样，避免抽样后类别极度失衡。
+    Sample in proportion to class size.
     """
     if sample_size is None or sample_size <= 0 or sample_size >= len(df):
         return df.copy()
@@ -354,11 +354,11 @@ def stratified_train_val_split(
     seed: int = 42,
 ):
     """
-    原始版本的分层随机切分。
-    现在仍然保留，方便对照实验。
+    Original stratified random split.
+    Retained for comparison experiments.
     """
     if not (0.0 < val_ratio < 1.0):
-        raise ValueError("val_ratio 必须在 (0, 1) 范围内")
+        raise ValueError("val_ratio must be within (0, 1)")
 
     train_parts = []
     val_parts = []
@@ -383,11 +383,11 @@ def stratified_train_val_split(
 
 def compute_file_md5(path: str, chunk_size: int = 1024 * 1024) -> str:
     """
-    计算单个文件的 MD5。
+    Compute a file's MD5.
 
-    用途:
-    - 找完全重复的图片
-    - 把完全一样的图片放进同一个 group
+    Purpose:
+    - Find byte-identical images
+    - Assign identical files to the same group
     """
     md5 = hashlib.md5()
     with open(path, "rb") as f:
@@ -405,13 +405,13 @@ def attach_md5_group_ids(
     group_col: str = "group_id",
 ) -> pd.DataFrame:
     """
-    给 dataframe 增加 group_id 列。
+    Add a group_id column to the dataframe.
 
-    这里先用最稳妥的 exact duplicate 分组方式：
-    - 同一个 md5 -> 同一组
-    - 不同 md5 -> 不同组
+    Group exact duplicates by file content:
+    - Same MD5 -> same group
+    - Different MD5 -> different groups
 
-    第一次跑会稍微慢一点，因为要对训练图片逐张算哈希。
+    The first pass hashes each training image.
     """
     df = df.copy()
     df[group_col] = df[path_col].apply(compute_file_md5)
@@ -426,20 +426,20 @@ def group_aware_train_val_split(
     seed: int = 42,
 ):
     """
-    按 group 做 train / val 切分，避免完全重复图泄漏。
+    Split by group to keep duplicate images in one partition.
 
-    逻辑:
-    - 先按 label 分层
-    - 每个类别内部再按 group 划分
-    - 同一个 group 不允许同时出现在 train 和 val
+    Procedure:
+    - Stratify by label
+    - Split the groups within each class
+    - Each group belongs to only one partition: train or val
 
-    这不是完整的 GroupKFold，
-    但已经比普通随机分层切分更可靠，适合作为第一步改进。
+    This is a partial implementation of GroupKFold,
+    Grouping exact duplicates addresses one source of leakage.
     """
     if group_col not in df.columns:
-        raise ValueError(f"df 中缺少 {group_col} 列，请先调用 attach_md5_group_ids()")
+        raise ValueError(f"df is missing the {group_col} column; first call attach_md5_group_ids()")
     if not (0.0 < val_ratio < 1.0):
-        raise ValueError("val_ratio 必须在 (0, 1) 范围内")
+        raise ValueError("val_ratio must be within (0, 1)")
 
     rng = random.Random(seed)
     train_parts = []
@@ -464,7 +464,7 @@ def group_aware_train_val_split(
             else:
                 train_indices.extend(indices)
 
-        # 防止极端情况下某一类全部被分进 val
+        # Avoid assigning an entire class to val
         if len(train_indices) == 0 and len(group_items) > 0:
             _, last_indices = group_items[-1]
             val_indices = [idx for idx in val_indices if idx not in last_indices]

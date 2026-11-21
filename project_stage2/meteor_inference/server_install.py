@@ -1,4 +1,4 @@
-"""在服务器上后台安装 causal-conv1d 和 mamba-ssm"""
+"""Install causal-conv1d in the background along with mamba-ssm"""
 import os
 import paramiko
 import time

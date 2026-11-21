@@ -2,7 +2,7 @@
 
 import matplotlib
 
-# 在无图形界面的环境中保存图片，避免报错
+# Save plots in headless environments
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 
 def plot_label_distribution(df, output_path):
     """
-    绘制类别分布柱状图。
+    Plot class counts.
 
-    这个函数主要用于训练前的数据检查：
-    - 看类别是否平衡
-    - 看 train / val 的切分是否合理
+    Inspect data before training:
+    - Check class balance
+    - Compare training and validation distributions
     """
     counts = df["label"].value_counts().sort_index()
 
@@ -33,12 +33,12 @@ def plot_label_distribution(df, output_path):
 
 def save_sample_grid(dataset, output_path, max_images=16):
     """
-    保存样本网格图，用来快速检查图片和标签是否读对了。
+    Save a grid for checking images and labels.
 
-    参数:
-    - dataset: 需要能返回 (image_tensor, label)
-    - output_path: 图片保存路径
-    - max_images: 最多展示多少张样本
+    settings:
+    - dataset: must return (image_tensor, label)
+    - output_path: output image path
+    - max_images: maximum samples to show
     """
     max_images = min(max_images, len(dataset))
     cols = 4
@@ -48,8 +48,8 @@ def save_sample_grid(dataset, output_path, max_images=16):
     for i in range(max_images):
         image, label = dataset[i]
 
-        # Dataset 返回的是标准化后的 Tensor。
-        # 为了方便显示，这里做一个近似反归一化。
+        # Dataset returns normalized Tensor.
+        # Approximately undo normalization for display.
         img = image.permute(1, 2, 0).numpy()
         img = img * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]
         img = img.clip(0, 1)
@@ -68,20 +68,20 @@ def save_sample_grid(dataset, output_path, max_images=16):
 
 def plot_training_curves(history, output_path):
     """
-    根据每个 epoch 的训练记录，绘制训练过程折线图。
+    Plot training curves from per-epoch records.
 
-    生成的图包含 4 个子图：
+    The figure has four panels:
     - Loss
     - Accuracy
     - F1 Score
     - Learning Rate
 
-    其中 history 应该是一个列表，列表中的每个元素是一个字典，
-    至少包含以下字段：
+    Pass history as a list of dictionaries,
+    with at least these fields:
     epoch, train_loss, val_loss, train_acc, val_acc, train_f1, val_f1, lr
     """
     if not history:
-        raise ValueError("history 为空，无法绘制训练曲线")
+        raise ValueError("history is empty; cannot plot training curves")
 
     epochs = [row["epoch"] for row in history]
     train_loss = [row["train_loss"] for row in history]

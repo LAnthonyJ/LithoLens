@@ -1,6 +1,6 @@
 """
-DINOv2 ViT-L14 特征提取 + SVM/kNN 融合分类器
-同组同学的高分方案：冻结 DINOv2 提取特征，训练轻量级分类器，TTA 多视角融合
+DINOv2 ViT-L14 feature extraction with an SVM/kNN ensemble
+Freeze DINOv2, fit lightweight classifiers and combine test views
 """
 from pathlib import Path
 import sys
@@ -27,7 +27,7 @@ from sklearn.pipeline import make_pipeline
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # ==========================================
-# 0. 配置
+# 0. Configuration
 # ==========================================
 DATA_ROOT = Path("/data/数据科学实践project")
 OUTPUT_DIR = DATA_ROOT / "runs" / f"dinov2_vitl14_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -53,7 +53,7 @@ def set_seed(seed):
 set_seed(SEED)
 
 # ==========================================
-# 1. 数据集类
+# 1. Dataset class
 # ==========================================
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):
@@ -76,14 +76,14 @@ class MeteoriteDataset(torch.utils.data.Dataset):
 
 
 # ==========================================
-# 2. 数据加载与去重切分 (复用原版逻辑)
+# 2. Load, deduplicate and split the data (original procedure)
 # ==========================================
 def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir():
             return c
-    raise FileNotFoundError(f"找不到 {split} 图片目录")
+    raise FileNotFoundError(f"Missing {split} image directory")
 
 
 def load_train_dataframe(data_root):
@@ -197,7 +197,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
               .drop_duplicates(subset=md5_group_col, keep='first')
               .reset_index(drop=True).copy())
     dhash_list, failed_paths = [], []
-    for image_path in tqdm(rep_df[path_col].tolist(), desc='计算 dHash'):
+    for image_path in tqdm(rep_df[path_col].tolist(), desc='Compute dHash'):
         try:
             dhash_list.append(compute_dhash_int(image_path))
         except Exception:
@@ -209,7 +209,7 @@ def build_near_duplicate_families_from_md5_groups(df, path_col='img_path', md5_g
     valid_rep_df['dhash'] = valid_rep_df['dhash'].map(int)
     n = len(valid_rep_df)
     uf = UnionFind(n)
-    for i in tqdm(range(n), desc='构建 near-duplicate family'):
+    for i in tqdm(range(n), desc='Build near-duplicate family'):
         hi = valid_rep_df.loc[i, 'dhash']
         for j in range(i + 1, n):
             if hamming_distance_int(hi, valid_rep_df.loc[j, 'dhash']) <= threshold:
@@ -245,23 +245,23 @@ def drop_exact_duplicates_in_train(df, group_col='group_id'):
 
 
 # ==========================================
-# 3. 加载训练数据 + 去重 + 切分
+# 3. Load training data, deduplicate and split
 # ==========================================
 print("\n" + "=" * 60)
-print("数据加载与预处理")
+print("Load and preprocess data")
 print("=" * 60)
 
 full_train_df = load_train_dataframe(DATA_ROOT)
-print(f'训练样本数: {len(full_train_df)}')
-print(f'类别分布:\n{full_train_df["label"].value_counts().sort_index()}')
+print(f'Training samples: {len(full_train_df)}')
+print(f'Class distribution:\n{full_train_df["label"].value_counts().sort_index()}')
 
 train_pool_df = attach_md5_group_ids(full_train_df)
-print(f'唯一 MD5 group 数: {train_pool_df["group_id"].nunique()}')
+print(f'Unique MD5 groups: {train_pool_df["group_id"].nunique()}')
 
 train_pool_df, near_dup_rep_df, near_dup_failed = build_near_duplicate_families_from_md5_groups(
     train_pool_df, md5_group_col='group_id', threshold=6
 )
-print(f'near-duplicate family 数: {train_pool_df["near_dup_family_id"].nunique()}')
+print(f'near-duplicate family count: {train_pool_df["near_dup_family_id"].nunique()}')
 
 train_df, val_df = group_aware_train_val_split(
     train_pool_df, label_col='label', group_col='near_dup_family_id',
@@ -269,27 +269,27 @@ train_df, val_df = group_aware_train_val_split(
 )
 
 train_df, removed = drop_exact_duplicates_in_train(train_df)
-print(f'去重后 train: {len(train_df)}, val: {len(val_df)}, 移除重复: {removed}')
-print(f'Train 类别: {train_df["label"].value_counts().sort_index().to_dict()}')
-print(f'Val 类别: {val_df["label"].value_counts().sort_index().to_dict()}')
+print(f'After deduplication train: {len(train_df)}, val: {len(val_df)}, duplicates removed: {removed}')
+print(f'Train classes: {train_df["label"].value_counts().sort_index().to_dict()}')
+print(f'Val classes: {val_df["label"].value_counts().sort_index().to_dict()}')
 
 # ==========================================
-# 4. 加载 DINOv2 ViT-L14
+# 4. Load DINOv2 ViT-L14
 # ==========================================
 print("\n" + "=" * 60)
-print("加载 DINOv2 ViT-L14 (with registers)")
+print("Load DINOv2 ViT-L14 (with registers)")
 print("=" * 60)
 
 dinov2_model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
 dinov2_model.eval()
 dinov2_model.to(DEVICE)
-print("✅ DINOv2 ViT-L14 加载完毕")
+print("✅ DINOv2 ViT-L14 loaded")
 
 # ==========================================
-# 5. 特征提取
+# 5. Feature extraction
 # ==========================================
 print("\n" + "=" * 60)
-print("特征提取")
+print("Feature extraction")
 print("=" * 60)
 
 base_transform = transforms.Compose([
@@ -302,7 +302,7 @@ base_transform = transforms.Compose([
 
 @torch.no_grad()
 def extract_embeddings(loader, model, device, is_test=False):
-    """用 DINOv2 提取图像特征向量。"""
+    """Extract image embeddings with DINOv2."""
     model.eval()
     all_embeddings, all_labels, all_paths = [], [], []
     for batch in tqdm(loader, desc='Extracting Features'):
@@ -324,19 +324,19 @@ def extract_embeddings(loader, model, device, is_test=False):
 train_dataset = MeteoriteDataset(train_df, transforms=base_transform)
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
-print("提取训练集特征...")
+print("Extract training features...")
 train_X, train_y = extract_embeddings(train_loader, dinov2_model, DEVICE, is_test=False)
-print(f"训练集特征: {train_X.shape}, 标签分布: {np.bincount(train_y.astype(int))}")
+print(f"Training features: {train_X.shape}, Class distribution: {np.bincount(train_y.astype(int))}")
 
 # ==========================================
-# 6. TTA 多视角提取测试集特征
+# 6. TTA Extract features from multiple test views
 # ==========================================
 print("\n" + "=" * 60)
-print("TTA 测试集特征提取")
+print("TTA Extract test features")
 print("=" * 60)
 
 test_df = load_test_dataframe(DATA_ROOT)
-print(f'测试集样本数: {len(test_df)}')
+print(f'Test images: {len(test_df)}')
 
 tta_transforms = [
     base_transform,
@@ -346,7 +346,7 @@ tta_transforms = [
 
 test_X_tta_list = []
 for i, t in enumerate(tta_transforms):
-    print(f"TTA 视角 {i+1}/3 ...")
+    print(f"TTA view {i+1}/3 ...")
     test_dataset = MeteoriteDataset(test_df, transforms=t)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
     curr_X, test_ids = extract_embeddings(test_loader, dinov2_model, DEVICE, is_test=True)
@@ -354,13 +354,13 @@ for i, t in enumerate(tta_transforms):
 
 test_X = np.mean(test_X_tta_list, axis=0)
 test_X = normalize(test_X, norm='l2', axis=1)
-print(f"测试集特征: {test_X.shape}")
+print(f"Test features: {test_X.shape}")
 
 # ==========================================
-# 7. 5折交叉验证训练 SVM + kNN
+# 7. 5 fold cross-validation training SVM + kNN
 # ==========================================
 print("\n" + "=" * 60)
-print("5折交叉验证 SVM + kNN")
+print("5 fold cross-validation SVM + kNN")
 print("=" * 60)
 
 n_splits = 5
@@ -392,10 +392,10 @@ for fold, (train_idx, val_idx) in enumerate(skf.split(train_X, train_y)):
     knn_test_preds += knn.predict_proba(test_X)[:, 1] / n_splits
 
 # ==========================================
-# 8. Rank Average 融合 + 生成提交文件
+# 8. Rank Average Blend predictions and write submission
 # ==========================================
 print("\n" + "=" * 60)
-print("融合 + 生成提交文件")
+print("Blend predictions and write submission")
 print("=" * 60)
 
 final_scores = (svm_test_preds + knn_test_preds) / 2.0
@@ -404,11 +404,11 @@ clean_test_ids = [Path(p).name for p in test_ids]
 sub_df = pd.DataFrame({'id': clean_test_ids, 'prob': final_scores})
 sub_df = sub_df.sort_values(by='prob', ascending=False).reset_index(drop=True)
 
-# 保存完整概率表
+# Save all predicted probabilities
 sub_df.to_csv(OUTPUT_DIR / 'test_pred_probs_dinov2.csv', index=False, encoding='utf-8-sig')
-print(f"概率分布: min={sub_df['prob'].min():.4f}, max={sub_df['prob'].max():.4f}, mean={sub_df['prob'].mean():.4f}")
+print(f"Probability distribution: min={sub_df['prob'].min():.4f}, max={sub_df['prob'].max():.4f}, mean={sub_df['prob'].mean():.4f}")
 
-# Top-85 提交
+# Top-85 submission
 top_k = 85
 sub_df['label'] = 0
 sub_df.loc[:top_k - 1, 'label'] = 1
@@ -419,10 +419,10 @@ template_df['label'] = template_df['label'].astype(int)
 
 output_csv = OUTPUT_DIR / 'submission_dinov2_L14_rankavg_top85.csv'
 template_df.to_csv(output_csv, index=False)
-print(f"✅ 提交文件已保存: {output_csv}")
-print(f"   预测正类: {int(sub_df['label'].sum())}, 负类: {int((sub_df['label'] == 0).sum())}")
+print(f"✅ Submission saved: {output_csv}")
+print(f"   Predicted positives: {int(sub_df['label'].sum())}, negatives: {int((sub_df['label'] == 0).sum())}")
 
-# 保存摘要
+# Save summary
 summary = {
     'model': 'DINOv2 ViT-L14 (registers)',
     'classifier': 'SVM(RBF) + kNN 5-fold ensemble',
@@ -436,4 +436,4 @@ summary = {
 with open(OUTPUT_DIR / 'run_summary.json', 'w', encoding='utf-8') as f:
     json.dump(summary, f, indent=2, ensure_ascii=False)
 
-print("\n🎉 全部完成！")
+print("\n🎉 Finished!")

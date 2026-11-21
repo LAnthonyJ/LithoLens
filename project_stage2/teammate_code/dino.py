@@ -7,13 +7,13 @@ class DINOv2Classifier(nn.Module):
         num_classes=2,
         model_name="vit_base_patch14_dinov2.lvd142m",  # ViT-B/14
         freeze=True,
-        head="mlp",          # "linear" 或 "mlp"
-        img_size=448,        # 必须是 14 的倍数
+        head="mlp",          # "linear" or "mlp"
+        img_size=448,        # must be a multiple of 14
     ):
         super().__init__()
         self.freeze = freeze
 
-        # num_classes=0 -> 去掉分类头，forward 返回 (B, feat_dim) 的 pooled 特征
+        # num_classes=0 -> remove the head and return pooled features of shape (B, feat_dim)
         self.backbone = timm.create_model(
             "vit_base_patch14_dinov2.lvd142m",
             pretrained=True,
@@ -43,13 +43,13 @@ class DINOv2Classifier(nn.Module):
 
     def forward(self, x):
         if self.freeze:
-            with torch.no_grad():        # 省显存 + 省算力，不建图
+            with torch.no_grad():        # skip the gradient graph to save memory and compute
                 feat = self.backbone(x)
         else:
             feat = self.backbone(x)
         return self.head(feat)
 
-    # 关键：训练循环里会调 net.train()，要确保冻结的 backbone 始终在 eval
+    # net.train() runs during training; keep the frozen backbone in eval
     def train(self, mode=True):
         super().train(mode)
         if self.freeze:
@@ -62,7 +62,7 @@ class DINOv3Classifier(nn.Module):
         num_classes=2,
         freeze=True,
         head="mlp",          # "linear" or "mlp"
-        img_size=512,        # DINOv3 ViT-L/16 默认 256；必须是 16 的倍数
+        img_size=512,        # DINOv3 ViT-L/16 defaults to 256; must be a multiple of 16
         model_name="vit_large_patch16_dinov3.lvd1689m",
         ckpt_path="/data/home/huanghp/hf_models/vit_large_patch16_dinov3.lvd1689m/model.safetensors",
     ):
@@ -133,7 +133,7 @@ class DINOv3Classifier(nn.Module):
     def train(self, mode=True):
         super().train(mode)
 
-        # 如果 freeze=True，即使外面调用 net.train()，backbone 也保持 eval
+        # When freeze=True, net.train() keeps the backbone in eval
         if self.freeze:
             self.backbone.eval()
 

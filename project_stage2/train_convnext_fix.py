@@ -18,7 +18,7 @@ from pathlib import Path
 from PIL import Image
 
 # Setup
-DATA_ROOT = Path("/data/数据科学实践project")
+DATA_ROOT = Path("/data/鏁版嵁绉戝瀹炶返project")
 OUTPUT_BASE = DATA_ROOT / "runs" / "v13_proper"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 

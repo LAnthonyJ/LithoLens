@@ -5,7 +5,7 @@ from torchvision import transforms
 
 
 class RandomJPEGCompression:
-    """随机 JPEG 压缩增强。模拟测试集里更重的压缩痕迹。"""
+    """Random JPEG compression simulates compression artifacts."""
 
     def __init__(self, quality_min=25, quality_max=75, p=0.5):
         self.quality_min = quality_min
@@ -24,7 +24,7 @@ class RandomJPEGCompression:
 
 
 class RandomDownUpSample:
-    """随机"先缩小再放大"增强。模拟低分辨率图片被强行放大后的模糊。"""
+    """Downsample and upsample to simulate low-resolution blur."""
 
     def __init__(self, scale_min=0.35, scale_max=0.8, p=0.5):
         self.scale_min = scale_min
@@ -43,7 +43,7 @@ class RandomDownUpSample:
 
 
 class RandomGaussianBlur:
-    """随机高斯模糊增强。模拟失焦、低清晰度图片。"""
+    """Random Gaussian blur simulates defocus."""
 
     def __init__(self, radius_min=0.3, radius_max=1.2, p=0.3):
         self.radius_min = radius_min
@@ -58,7 +58,7 @@ class RandomGaussianBlur:
 
 
 def build_train_transforms(img_size: int = 224):
-    """训练阶段增强：基础增强 + 退化增强，贴近 Stage 2 真实测试图分布。"""
+    """Combine image and degradation augmentations for Stage 2 training."""
     return transforms.Compose(
         [
             transforms.Resize((img_size, img_size)),
@@ -75,7 +75,7 @@ def build_train_transforms(img_size: int = 224):
 
 
 def build_eval_transforms(img_size: int = 224):
-    """验证/测试阶段不做随机增强，只做确定性预处理。"""
+    """Use deterministic preprocessing for validation and testing."""
     return transforms.Compose(
         [
             transforms.Resize((img_size, img_size)),

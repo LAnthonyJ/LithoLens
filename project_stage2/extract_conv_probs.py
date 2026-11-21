@@ -1,4 +1,4 @@
-"""快速提取 ConvNeXt-Base 概率，用于与 TopBot 融合"""
+"""Extract ConvNeXt-Base scores for the TopBot blend"""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -24,7 +24,7 @@ def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir(): return c
-    raise FileNotFoundError(f"找不到 {split}")
+    raise FileNotFoundError(f"Missing {split}")
 
 class MeteoriteDataset(torch.utils.data.Dataset):
     def __init__(self, dataframe, transforms=None):

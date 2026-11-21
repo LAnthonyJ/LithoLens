@@ -7,7 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 from PIL import Image
 
-DATA_ROOT = Path("/data/数据科学实践project")
+DATA_ROOT = Path("/data/鏁版嵁绉戝瀹炶返project")
 OUTPUT_BASE = DATA_ROOT / "runs" / "v13_proper" / "pseudo_self"
 DEVICE = "cuda"; BATCH = 8
 
@@ -90,8 +90,7 @@ for k in [80,82,85,88,90,92,95]:
 
 conv_path = DATA_ROOT / "runs" / "v13_proper" / "convnextv2_base_frozen_head_v2" / "test_prob.csv"
 if conv_path.exists():
-    print("
-=== Blend ===")
+    print("\n=== Blend ===")
     conv = pd.read_csv(conv_path)
     df = out[["id","prob"]].rename(columns={"prob":"prob_dino"})
     df = df.merge(conv[["id","prob"]].rename(columns={"prob":"prob_conv"}), on="id")

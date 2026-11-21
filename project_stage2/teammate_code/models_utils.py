@@ -3,18 +3,18 @@ from torchvision.models import resnet34, convnext_base, convnext_large, ConvNeXt
 import torch.nn as nn
 import os
 from models.dino import DINOv2Classifier, DINOv3Classifier
-# 修改 models/utils.py 中的 build_model 函数
+# Update build_model in models/utils.py
 def build_model(args, device="cuda", num_classes=2):
     if args.model == 'resnet34':
         net = resnet34(pretrained=True)
         in_features = net.fc.in_features
-        # 加入 Dropout 防止过拟合
+        # Use dropout to limit overfitting
         net.fc = nn.Sequential(
             nn.Dropout(p=0.4),
             nn.Linear(in_features, num_classes)
         )
     elif args.model == 'efficientnet_b3':
-        # 尝试使用 torchvision 内置的更强网络
+        # Try a larger torchvision backbone
         from torchvision.models import efficientnet_b3, EfficientNet_B3_Weights
         net = efficientnet_b3(weights=EfficientNet_B3_Weights.DEFAULT)
         in_features = net.classifier[1].in_features

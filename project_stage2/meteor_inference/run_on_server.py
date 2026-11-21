@@ -1,6 +1,6 @@
 """
-Meteor-Mamba 陨石批量识别 - 服务器版
-在 Linux GPU 服务器上运行，对测试集进行零样本分类
+Meteor-Mamba batch meteorite classification on a server
+Run zero-shot inference on a Linux GPU server
 """
 import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'

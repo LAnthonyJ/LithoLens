@@ -1,6 +1,6 @@
 """
-Meteor特征提取 + SVM/kNN分类器训练
-类似DINOv2方案，但使用Meteor-Mamba提取的特征
+Meteor feature extraction and SVM/kNN training
+Use Meteor-Mamba embeddings in the DINOv2 classifier workflow
 """
 import os, sys, json, time, pickle
 from pathlib import Path

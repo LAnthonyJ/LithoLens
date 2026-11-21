@@ -1,42 +1,85 @@
 # LithoLens | Meteorite Image Classification
 
-![两张训练集照片并排对照。左侧 000019 是陨石，右侧 000003 是非陨石。](docs/figures/specimens.jpg)
+![Two labeled training specimens: meteorite 000019 and terrestrial rock 000003.](docs/figures/specimens.jpg)
 
-**只看一张照片，能分辨陨石和普通岩石吗？** 上面两块标本都有深色颗粒和不规则边缘。LithoLens 把整块岩石的视觉表征与表面的明暗变化结合起来，在课程竞赛第二阶段的私有测试集上取得 **F1 0.86046**。照片下方标注的是训练集标签。
+Both specimens have dark grains and irregular edges. What helps a classifier tell them apart? LithoLens pairs a frozen visual encoder with measurements of local contrast, edges and surface texture. The final submission reached **0.86046 F1 on the Stage 2 private competition test set**, up from **0.56953** for the supervised baseline.
 
-[模型原理](#method) · [实验成绩](#results) · [复现提交](#quick-start) · [模型和数据](https://pan.baidu.com/s/11ZQfDjY0uJAMb_7RTkR_kQ?pwd=dn2w)（提取码 `dn2w`）
+[Training data](#training-data) · [Model](#what-the-model-learns) · [Learning curves](#when-training-stopped) · [Competition results](#competition-results) · [Run inference](#reproduce-the-submission)
 
-## Method
+## Training data
 
-![训练样本 000019 的原图、15 像素窗口的局部标准差，以及 Sobel 梯度幅值。亮色表示响应更强。](docs/figures/surface.jpg)
+![Stacked bars show the original competition data, supplementary images and pseudo-labeled test data, divided by class.](docs/figures/training-pool.png)
 
-中图统计每个像素周围 **15 × 15** 区域的灰度变化，右图显示亮度变化最快的位置。沿标本轮廓和右侧比例尺都能看到亮边，因此背景和拍摄条件也会进入纹理统计。两幅图均由左侧照片计算得到。实现见 [纹理特征提取代码](run.py)。
+| Image source | Non-meteorite | Meteorite | Total |
+| --- | ---: | ---: | ---: |
+| Labeled competition images | 2,413 | 2,685 | 5,098 |
+| Supplementary rock and meteorite images | 2,069 | 570 | 2,639 |
+| Competition test images with pseudo-labels | 110 | 84 | 194 |
+| **Combined pool** | **4,592** | **3,339** | **7,931** |
+
+The original pool contains slightly more meteorites than terrestrial rocks. The supplement adds **476 quartzite, 383 marble, 369 coal, 331 limestone, 323 sandstone, 101 granite and 86 basalt images**, along with 570 meteorites. That changes the examples the classifier sees and lowers the meteorite share from 52.7% to 42.1% in the combined pool.
+
+The training script assigns provisional labels to the 194 competition test images. It then shuffles the combined pool within each class using seed 35 and reserves 10% per class, rounded down. This gives **7,139 training images** and **792 validation images** (459 negatives and 333 positives). The validation partition can therefore contain pseudo-labels. The texture scaler also uses the combined pool before the split. Both details matter when interpreting the internal validation score. [Dataset assembly and split](train.py)
+
+## What the model learns
+
+![Meteorite 000019 in three views: original image, local grayscale variation over 15-pixel windows, and Sobel edge magnitude.](docs/figures/surface.jpg)
+
+The center image measures the variation in brightness inside a **15 × 15** window. The right image shows where brightness changes most sharply. The scale cube lights up along with the specimen rim: the texture branch measures the whole photograph, including its background.
 
 ```mermaid
 flowchart TD
-  A["Specimen photograph"] --> B["Frozen DINOv3-L · 1,024 features"]
-  A --> C["Surface texture · 21 descriptors"]
-  B --> D["Concatenate · 1,045 inputs"]
-  C --> D
-  D --> E["MLP head · average over 4 views"]
-  E --> F["Blend scores and rank"]
-  G["Cached ConvNeXtV2 scores"] --> F
-  F --> H["Competition submission · top 86"]
+  A["Specimen photograph"] --> B["512 × 512 RGB · frozen DINOv3-L"]
+  A --> C["256 × 256 grayscale · texture extraction"]
+  B --> D["1,024 visual features"]
+  C --> E["21 scaled descriptors"]
+  D --> F["1,045 inputs · LayerNorm → Linear → GELU → Dropout → Linear"]
+  E --> F
+  F --> G["Two class scores"]
 ```
 
-DINOv3-L 从 512 × 512 的图像中提取整体表征。纹理分支在 256 × 256 灰度图上计算三个尺度的局部变化，并补充全局对比度、梯度、频域能量和直方图熵。分类头合并这两组信息，对原图和三种翻转视图分别预测，再取平均。
+1. **Encode the image.** DINOv3-L supplies 1,024 features. The texture extractor measures local variation at three window sizes (7, 15 and 31 pixels), giving 15 statistics. Global brightness spread, contrast, two Sobel statistics, high-frequency energy and histogram entropy add six more.
+2. **Train the head.** The backbone stays frozen. The classifier maps 1,045 inputs to 512 hidden units and two outputs, with dropout 0.3. Random crops, flips, perspective and affine transforms, and random erasing vary the RGB input during training. The texture vector comes from the original photograph.
+3. **Select a checkpoint.** Training uses batches of 8, AdamW with initial learning rate 0.00004, cosine decay and cross-entropy with label smoothing 0.1. After each epoch, the script sweeps validation thresholds from 0.05 to 0.95 in steps of 0.005 and keeps the head with the best meteorite-class F1. [Training implementation](train.py)
 
-最终排序分数为 `0.80 × DINOv3-Texture + 0.15 × ConvNeXtV2`。比赛提交把 194 张指定测试照片中排名最高的 86 张标为正例；这个名额是该次提交的设置。
+## When training stopped
 
-## Results
+![Training and validation loss across 13 epochs, alongside validation F1 at a fixed and a tuned threshold. The dotted line marks epoch 5.](docs/figures/learning-curves.png)
 
-![项目报告中的六次第二阶段提交，F1 依次为 0.56953、0.70198、0.74468、0.75000、0.83236 和 0.86046。](docs/figures/results.png)
+| Epoch | Training loss | Validation loss | F1 at 0.50 | Best validation F1 | Selected threshold for epoch |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.3958 | 0.3240 | 0.92655 | 0.95152 | 0.710 |
+| **5** | **0.2813** | **0.2695** | **0.96916** | **0.97910** | **0.595** |
+| 13 | 0.2578 | 0.2594 | 0.97345 | 0.97751 | 0.665 |
 
-在四组使用 DINOv2 的实验中，检索与 SVM 方案取得 **0.75000**；加入纹理特征并调整分类头后达到 **0.83236**。最终方案同时更换骨干网络、加入补充训练样本并融合两个模型的分数，取得 **0.86046**。这些是完整配置的提交成绩，不能从相邻两次的差值推算单个组件的贡献。
+Training loss continued to fall after epoch 5. The next eight epochs produced no higher validation F1, so early stopping retained the epoch-5 head. The archived run's best-head file matches the published checkpoint byte for byte. The **0.97910** score measures checkpoint selection on the internal split; **0.86046** is the competition result for the complete submission. [All 13 epochs](docs/data/training-history.tsv) · [Published head](checkpoints/dinov3_tex_mlp_head.pth)
 
-## Quick Start
+## Competition results
 
-从仓库根目录执行。准备原版 Stage 2 竞赛数据，保留 `sample_submission.csv` 的原始行序。仓库内的纹理缓存按该顺序读取，ConvNeXtV2 分数对应同一批测试图片。
+![Stage 2 competition F1 for six submitted configurations, from 0.56953 for EfficientNet-B1 to 0.86046 for the final ensemble.](docs/figures/results.png)
+
+| Submitted configuration | Stage 2 F1 |
+| --- | ---: |
+| EfficientNet-B1 with a top-65 decision rule | 0.56953 |
+| DINOv2 embeddings with kNN and logistic regression | 0.70198 |
+| DINOv2 with retrieval over visually related examples | 0.74468 |
+| Retrieval plus an RBF SVM and feature-level test-time augmentation | 0.75000 |
+| DINOv2 with texture features and a stronger classifier head | 0.83236 |
+| DINOv3-L, texture MLP, supplementary data, four views and ConvNeXtV2 blending | **0.86046** |
+
+The largest step after the retrieval experiments was **0.08236 F1**, from 0.75000 to 0.83236, when both the texture inputs and classifier head changed. The course report records scores for complete submissions; it does not isolate the contribution of either change.
+
+### Which images did the blend change?
+
+At inference, the head predicts each specimen in four views: original, horizontal flip, vertical flip and both flips. The submission ranks images by **0.80 × mean DINOv3–texture probability + 0.15 × ConvNeXtV2 probability** and calls the highest 86 of 194 positive. The weighted value is used as a ranking score.
+
+![Four test photographs around the cutoff. Ranks 84 and 86 were submitted as meteorites; ranks 87 and 88 as non-meteorites.](docs/figures/cutoff-examples.jpg)
+
+Compared with ranking the DINOv3–texture scores alone, blending changed two assignments. **000120** moved from rank 87 to 84 and entered the positive set. **000070** moved from 86 to 88 and left it. The final cutoff fell between scores **0.4012** and **0.3961**. These are submitted predictions. The released score file has no per-image private labels, so it cannot establish which individual calls were correct. [Scores, ranks and submitted labels for all 194 images](docs/data/test-ranking.tsv)
+
+## Reproduce the submission
+
+Run from the repository root using the original Stage 2 competition images and submission template. Keep the template in its original order: the bundled texture cache is indexed by row, and the bundled ConvNeXtV2 scores cover these 194 image IDs.
 
 ```text
 data/
@@ -52,29 +95,27 @@ python -m pip install -r requirements.txt
 python run.py --data_path ./data --output submission.csv
 ```
 
-首次运行会通过 `timm` 加载 DINOv3-L 权重。离线运行时，在推理命令后加上 `--dino_weights ./pretrained/dinov3_large/model.safetensors` 并将权重放在对应路径。生成的 `submission.csv` 包含 `id,label` 两列。[骨干网络权重](https://huggingface.co/timm/vit_large_patch16_dinov3.lvd1689m) · [已训练分类头与竞赛缓存](checkpoints/)
+The output has two columns, `id` and `label`. On the first run, `timm` loads the pretrained DINOv3-L backbone. For offline inference, download the backbone first and pass `--dino_weights ./pretrained/dinov3_large/model.safetensors`. [Backbone weights](https://huggingface.co/timm/vit_large_patch16_dinov3.lvd1689m) · [Classification heads and competition caches](checkpoints/) · [Supplementary archive, access code `dn2w`](https://pan.baidu.com/s/11ZQfDjY0uJAMb_7RTkR_kQ?pwd=dn2w)
 
 <details>
-<summary><strong>Training setup and experiment files</strong></summary>
+<summary><strong>Retrain the head and locate earlier experiments</strong></summary>
 
-训练脚本使用 5,098 张带标签的竞赛图片、2,639 张补充图片，以及 194 张带伪标签的竞赛测试图片。复现训练前，在 [train.py](train.py) 顶部设置 `DATA_ROOT` 和 `DINO_WEIGHTS`，准备 CUDA 环境，并将补充数据解压到数据根目录的 `Dataset/`。最终融合还会读取数据根目录下的 `runs/v13_proper/convnextv2_base_frozen_head_v2/test_prob.csv`，可使用仓库提供的 [ConvNeXtV2 测试分数](checkpoints/convnextv2_base_test_prob.csv)。
+Set `DATA_ROOT` and `DINO_WEIGHTS` at the top of [train.py](train.py). Under the data root, provide `train_labels.csv`, `train_images/train_images/`, the test inputs shown above, and the unpacked `Dataset/` supplement. For the final blend, place the supplied [ConvNeXtV2 test scores](checkpoints/convnextv2_base_test_prob.csv) at `runs/v13_proper/convnextv2_base_frozen_head_v2/test_prob.csv` under the data root. Run on a CUDA machine:
 
 ```bash
 python train.py
 ```
 
-分类头使用 512 个隐藏单元，Dropout 为 0.3。训练采用 AdamW，学习率为 `4e-5`，批量大小为 8，最多训练 20 轮，按验证 F1 早停。
-
 | Directory | Contents |
 | --- | --- |
-| [Stage 1 baseline](meteorite-identification-main/) | 基线 Notebook、CNN 模型与训练工具 |
-| [Stage 2 analysis](meteorite-identification-stage-2/) | 分布偏移、遮挡分析与预测融合 |
-| [Training experiments](project_stage2/) | DINO、纹理分类器、集成和推理实验 |
+| [Stage 1 baseline](meteorite-identification-main/) | Training notebook, CNN models and data utilities |
+| [Stage 2 analysis](meteorite-identification-stage-2/) | Distribution shift, occlusion analysis and prediction blending |
+| [Training experiments](project_stage2/) | DINO, texture classifiers, ensembles and archived inference scripts |
 
 </details>
 
 ## Team
 
-STA326 数据科学实践 · 第 11 组 · 2026
+STA326 Data Science Practice · Group 11 · 2026
 
-张航源 · 陈杭楠 · 程卓 · 林敬知 · 潘昊阳
+Hangyuan Zhang · Hangnan Chen · Zhuo Cheng · Jingzhi Lin · Haoyang Pan

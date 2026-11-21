@@ -7,7 +7,7 @@ from tqdm import tqdm
 from pathlib import Path
 from PIL import Image
 
-DATA_ROOT = Path("/data/数据科学实践project")
+DATA_ROOT = Path("/data/鏁版嵁绉戝瀹炶返project")
 OUTPUT_BASE = DATA_ROOT / "runs" / "v13_proper" / "dinov3_correct"
 DEVICE = "cuda"
 IMG_SIZE = 512; BATCH = 8
@@ -89,8 +89,7 @@ print(f"DINOv3 Correct: th={best_th:.4f}, positives={int(sub['label'].sum())}")
 print(f"Prob: mean={mp.mean():.4f}, range=[{mp.min():.4f}, {mp.max():.4f}]")
 
 # Blend with ConvNeXtV2
-print("
-=== Blend ===")
+print("\n=== Blend ===")
 conv = pd.read_csv(DATA_ROOT / "runs" / "v13_proper" / "convnextv2_base_frozen_head_v2" / "test_prob.csv")
 df = out[["id","prob"]].rename(columns={"prob":"prob_dino"})
 df = df.merge(conv[["id","prob"]].rename(columns={"prob":"prob_conv"}), on="id")
@@ -107,8 +106,7 @@ for k in [80,82,85,88,90,92,95]:
     print(f"  Top-{k}: {int(s['label'].sum())} positives")
 
 # Solo Top-K
-print("
-=== DINOv3 Solo Top-K ===")
+print("\n=== DINOv3 Solo Top-K ===")
 for k in [80,82,85,88,90,92,95]:
     top = set(out.sort_values("prob", ascending=False).head(k)["id"].tolist())
     s = tmpl.copy(); s["label"] = s["id"].map(lambda x: 1 if x in top else 0).astype(int)

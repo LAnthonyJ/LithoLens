@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 
 def set_seed(seed: int = 42):
-    """固定随机种子，尽量保证实验可复现。"""
+    """Set random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -16,7 +16,7 @@ def set_seed(seed: int = 42):
 
 
 def build_bce_pos_weight(class_counts, device=None):
-    """根据各类别样本数，计算 BCEWithLogitsLoss 所需的 pos_weight。"""
+    """Compute the BCEWithLogitsLoss class weight pos_weight."""
     counts = torch.as_tensor(class_counts, dtype=torch.float32)
     if device is not None:
         counts = counts.to(device)
@@ -26,7 +26,7 @@ def build_bce_pos_weight(class_counts, device=None):
 
 
 class IntegerLabelBCEWithLogitsLoss(nn.Module):
-    """让 BCEWithLogitsLoss 兼容整数类别标签。"""
+    """Support integer class labels with BCEWithLogitsLoss."""
 
     def __init__(self, pos_weight=None, reduction="mean"):
         super().__init__()
@@ -34,7 +34,7 @@ class IntegerLabelBCEWithLogitsLoss(nn.Module):
 
     def forward(self, logits, labels):
         if logits.ndim != 2:
-            raise ValueError("BCEWithLogitsLoss 需要二维 logits，形状应为 [batch_size, num_classes]")
+            raise ValueError("BCEWithLogitsLoss expects two-dimensional logits shaped [batch_size, num_classes]")
 
         targets = F.one_hot(labels.to(torch.long), num_classes=logits.shape[1]).to(dtype=logits.dtype)
         return self.loss_fn(logits, targets)
@@ -42,7 +42,7 @@ class IntegerLabelBCEWithLogitsLoss(nn.Module):
 
 @torch.no_grad()
 def evaluate(model, loader, criterion, device):
-    """在验证集上评估 loss/acc/f1。"""
+    """Evaluate on validation data loss/acc/f1."""
     model.eval()
 
     total_loss = 0.0
@@ -86,7 +86,7 @@ def evaluate(model, loader, criterion, device):
 
 
 def train_one_epoch(model, loader, optimizer, criterion, device):
-    """训练 1 个 epoch，返回该 epoch 的平均指标。"""
+    """Train for one epoch and return mean metrics."""
     model.train()
 
     total_loss = 0.0

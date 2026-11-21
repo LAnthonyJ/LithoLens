@@ -1,4 +1,4 @@
-"""提取纹理特征概率，用于三方融合"""
+"""Extract texture-model probabilities for the three-way blend"""
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -17,7 +17,7 @@ def _resolve_image_dir(root, split):
     candidates = [root / f"{split}_images" / f"{split}_images", root / f"{split}_images"]
     for c in candidates:
         if c.is_dir(): return c
-    raise FileNotFoundError(f"找不到 {split}")
+    raise FileNotFoundError(f"Missing {split}")
 
 
 def compute_texture_features(image):
@@ -55,7 +55,7 @@ def compute_texture_features(image):
     return np.array(features, dtype=np.float64)
 
 
-def extract_all(image_paths, desc="纹理"):
+def extract_all(image_paths, desc="texture"):
     feats = []
     for path in tqdm(image_paths, desc=desc):
         try:
@@ -78,11 +78,11 @@ df_test["img_path"] = df_test["id"].apply(lambda x: str(test_dir / x))
 df_test = df_test[df_test["img_path"].apply(lambda p: Path(p).exists())].copy()
 
 # Extract
-print("提取训练集纹理特征...")
-train_X = extract_all(df_train["img_path"].tolist(), "训练纹理")
+print("Extract training texture features...")
+train_X = extract_all(df_train["img_path"].tolist(), "training textures")
 train_y = df_train["label"].values
-print("提取测试集纹理特征...")
-test_X = extract_all(df_test["img_path"].tolist(), "测试纹理")
+print("Extract test texture features...")
+test_X = extract_all(df_test["img_path"].tolist(), "test textures")
 
 # Train
 idx_tr, _ = train_test_split(np.arange(len(train_X)), test_size=0.2, stratify=train_y, random_state=42)
@@ -94,7 +94,7 @@ test_X_s = scaler.transform(test_X)
 
 clf = make_pipeline(RobustScaler(), LogisticRegression(max_iter=5000, C=1.0, class_weight='balanced', random_state=42))
 scores = cross_val_score(clf, X_tr_s, y_tr, cv=5, scoring='f1')
-print(f"纹理特征 5-fold F1: {scores.mean():.4f}+/-{scores.std():.4f}")
+print(f"Texture features 5-fold F1: {scores.mean():.4f}+/-{scores.std():.4f}")
 
 clf.fit(X_tr_s, y_tr)
 test_prob = clf.predict_proba(test_X_s)[:, 1]
@@ -102,5 +102,5 @@ test_prob = clf.predict_proba(test_X_s)[:, 1]
 clean_ids = [Path(p).name for p in df_test["img_path"]]
 prob_df = pd.DataFrame({'id': clean_ids, 'prob_tex': test_prob})
 prob_df.to_csv(DATA_ROOT / 'texture_probs.csv', index=False)
-print(f"纹理概率: min={test_prob.min():.4f} max={test_prob.max():.4f} mean={test_prob.mean():.4f}")
+print(f"Texture scores: min={test_prob.min():.4f} max={test_prob.max():.4f} mean={test_prob.mean():.4f}")
 print(f"Saved: {DATA_ROOT}/texture_probs.csv")

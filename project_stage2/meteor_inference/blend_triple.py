@@ -1,7 +1,7 @@
 """
-三模型概率加权融合
+Weighted probability blend of three models
 DINOv3-L (80%) + SwinV2-L (15%) + ConvNeXt-L (10%)
-每个模型独立提取特征 → 独立SVM/kNN → 概率加权融合 → top-90
+Extract features for each model, fit separate SVM/kNN classifiers, then blend their scores → top-90
 """
 import os, sys, json, pickle, time
 import numpy as np
@@ -70,7 +70,7 @@ def load_data():
         for c in candidates:
             if os.path.isdir(c):
                 return c
-        raise FileNotFoundError(f"找不到 {split}_images")
+        raise FileNotFoundError(f"Missing {split}_images")
 
     train_df = pd.read_csv(TRAIN_CSV)
     train_dir = resolve_dir("train")
@@ -267,7 +267,7 @@ def main():
     with open(os.path.join(OUTPUT_DIR, 'blend_config.json'), 'w') as f:
         json.dump({k: {'weight': v['weight']} for k, v in MODELS.items()}, f, indent=2)
 
-    print("\n完成！")
+    print("\n Done!")
 
 
 if __name__ == "__main__":
