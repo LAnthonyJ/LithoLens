@@ -1,8 +1,8 @@
-# LithoLens | Meteorite Image Classification
+# Meteorite Classification Model
 
 ![Two labeled training specimens: meteorite 000019 and terrestrial rock 000003.](docs/figures/specimens.jpg)
 
-Both specimens have dark grains and irregular edges. What helps a classifier tell them apart? LithoLens pairs a frozen visual encoder with measurements of local contrast, edges and surface texture. The final submission reached **0.86046 F1 on the Stage 2 private competition test set**, up from **0.56953** for the supervised baseline.
+Both specimens have dark grains and irregular edges. What helps a classifier tell them apart? Our model pairs a frozen visual encoder with measurements of local contrast, edges and surface texture. The final submission reached **0.86046 F1 on the Stage 2 private competition test set**, up from **0.56953** for the supervised baseline.
 
 [Training data](#training-data) · [Model](#what-the-model-learns) · [Learning curves](#when-training-stopped) · [Competition results](#competition-results) · [Run inference](#reproduce-the-submission)
 
