@@ -27,16 +27,7 @@ The training script assigns provisional labels to the 194 competition test image
 
 The center image measures the variation in brightness inside a **15 × 15** window. The right image shows where brightness changes most sharply. The scale cube lights up along with the specimen rim: the texture branch measures the whole photograph, including its background.
 
-```mermaid
-flowchart TD
-  A["Specimen photograph"] --> B["512 × 512 RGB · frozen DINOv3-L"]
-  A --> C["256 × 256 grayscale · texture extraction"]
-  B --> D["1,024 visual features"]
-  C --> E["21 scaled descriptors"]
-  D --> F["1,045 inputs · LayerNorm → Linear → GELU → Dropout → Linear"]
-  E --> F
-  F --> G["Two class scores"]
-```
+![A specimen photograph feeds two branches. DINOv3-L supplies 1,024 visual features and surface texture supplies 21 descriptors. A shared classifier combines them into two class scores.](docs/figures/model-flow.svg)
 
 1. **Encode the image.** DINOv3-L supplies 1,024 features. The texture extractor measures local variation at three window sizes (7, 15 and 31 pixels), giving 15 statistics. Global brightness spread, contrast, two Sobel statistics, high-frequency energy and histogram entropy add six more.
 2. **Train the head.** The backbone stays frozen. The classifier maps 1,045 inputs to 512 hidden units and two outputs, with dropout 0.3. Random crops, flips, perspective and affine transforms, and random erasing vary the RGB input during training. The texture vector comes from the original photograph.

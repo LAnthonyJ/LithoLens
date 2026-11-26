@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="model-flow-title model-flow-desc" width="720" height="570" viewBox="0 0 720 570" id="model-flow-root">
+<title id="model-flow-title">From specimen photograph to class scores</title>
+<desc id="model-flow-desc">A frozen DINOv3-L encoder and a grayscale texture extractor supply 1,024 and 21 features to a shared classifier that scores both rock classes.</desc>
+<defs><marker id="model-flow-tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#765954"/></marker></defs>
+<rect width="720" height="570" rx="16" fill="#fffaf1"/>
+<text x="360" y="48" text-anchor="middle" font-family="Georgia, serif" font-size="34" font-weight="normal" fill="#362731">How the classifier reads a rock</text>
+<path d="M360 124 V144" fill="none" stroke="#765954" stroke-width="2"/>
+<path d="M360 144 H196 Q188 144 188 152 V174" fill="none" stroke="#765954" stroke-width="2" marker-end="url(#model-flow-tip)"/>
+<path d="M360 144 H524 Q532 144 532 152 V174" fill="none" stroke="#765954" stroke-width="2" marker-end="url(#model-flow-tip)"/>
+<path d="M188 310 V330 Q188 338 196 338 H280 Q288 338 288 346 V362" fill="none" stroke="#765954" stroke-width="2" marker-end="url(#model-flow-tip)"/>
+<path d="M532 310 V330 Q532 338 524 338 H440 Q432 338 432 346 V362" fill="none" stroke="#765954" stroke-width="2" marker-end="url(#model-flow-tip)"/>
+<path d="M360 458 V480" fill="none" stroke="#765954" stroke-width="2" marker-end="url(#model-flow-tip)"/>
+<rect x="208" y="76" width="304" height="48" rx="12" fill="#362731" stroke="#362731"/>
+<text x="360" y="107" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" font-weight="bold" fill="#fffaf1">Specimen photograph</text>
+<rect x="32" y="176" width="312" height="134" rx="12" fill="#ffffff" stroke="#beaba2"/>
+<rect x="376" y="176" width="312" height="134" rx="12" fill="#ffffff" stroke="#beaba2"/>
+<text x="188" y="206" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="normal" fill="#795650">512 × 512 RGB</text>
+<text x="532" y="206" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="normal" fill="#795650">256 × 256 grayscale</text>
+<text x="188" y="248" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="bold" fill="#362731">Frozen DINOv3-L</text>
+<text x="532" y="248" text-anchor="middle" font-family="Arial, sans-serif" font-size="25" font-weight="bold" fill="#362731">Texture extraction</text>
+<text x="188" y="286" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="normal" fill="#362731">1,024 visual features</text>
+<text x="532" y="286" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="normal" fill="#362731">21 scaled descriptors</text>
+<rect x="64" y="364" width="592" height="94" rx="12" fill="#f6e9df" stroke="#975244"/>
+<text x="360" y="402" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#733e34">Feature fusion · 1,045 inputs</text>
+<text x="360" y="435" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" font-weight="normal" fill="#362731">LayerNorm → Linear (512) → GELU → Dropout → Linear (2)</text>
+<rect x="148" y="482" width="424" height="64" rx="12" fill="#362731" stroke="#362731"/>
+<text x="360" y="508" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#fff9ed">Two class scores</text>
+<text x="360" y="533" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="normal" fill="#f1d6bf">Meteorite  /  Non-meteorite</text>
+</svg>
